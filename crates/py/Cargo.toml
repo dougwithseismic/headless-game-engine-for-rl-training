@@ -1,0 +1,16 @@
+[package]
+name = "ghostlobby-py"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "ghostlobby"
+crate-type = ["cdylib"]
+
+[dependencies]
+ghostlobby-engine = { path = "../engine" }
+ghostlobby-telemetry = { path = "../telemetry" }
+bevy_ecs = { workspace = true }
+glam = { workspace = true }
+pyo3 = { workspace = true }
+serde_json = { workspace = true }

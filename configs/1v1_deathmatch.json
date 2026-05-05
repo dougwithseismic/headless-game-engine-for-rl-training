@@ -1,0 +1,10 @@
+{
+  "title": "arena-deathmatch",
+  "tick_rate": 64,
+  "arena": { "width": 600, "height": 600 },
+  "movement": { "max_speed": 200, "acceleration": 1000, "friction": 800 },
+  "combat": { "default_weapon": { "damage": 25, "fire_rate": 0.3, "range": 400 } },
+  "spawning": { "respawn_delay": 2 },
+  "teams": { "count": 2, "players_per_team": 1 },
+  "obstacles": []
+}

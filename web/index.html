@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GhostLobby</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    color: #e0e0e0;
+    font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    background: #111118;
+    border-bottom: 1px solid #1e1e2e;
+  }
+  header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    color: #8b5cf6;
+  }
+  .status {
+    display: flex;
+    gap: 20px;
+    font-size: 12px;
+    color: #666;
+  }
+  .status .live { color: #22c55e; }
+  .status .value { color: #a0a0b0; }
+  .main {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+  .canvas-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  canvas {
+    border: 1px solid #1e1e2e;
+    border-radius: 4px;
+  }
+  .sidebar {
+    width: 280px;
+    background: #111118;
+    border-left: 1px solid #1e1e2e;
+    padding: 16px;
+    overflow-y: auto;
+    font-size: 12px;
+  }
+  .sidebar h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #555;
+    margin-bottom: 10px;
+  }
+  .kill-feed {
+    list-style: none;
+  }
+  .kill-feed li {
+    padding: 4px 0;
+    border-bottom: 1px solid #1a1a24;
+    color: #888;
+  }
+  .kill-feed .killer { color: #f87171; }
+  .kill-feed .victim { color: #60a5fa; }
+  .kill-feed .tick-num { color: #444; font-size: 10px; }
+  .scoreboard {
+    margin-bottom: 20px;
+  }
+  .team-score {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+  }
+  .team-0 { color: #60a5fa; }
+  .team-1 { color: #f87171; }
+  .entity-list {
+    list-style: none;
+  }
+  .entity-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+  }
+  .hp-bar {
+    width: 60px;
+    height: 6px;
+    background: #1e1e2e;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .hp-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.1s;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>GHOSTLOBBY</h1>
+  <div class="status">
+    <span>Status: <span id="conn-status" class="live">connecting...</span></span>
+    <span>Tick: <span id="tick-count" class="value">0</span></span>
+    <span>Entities: <span id="entity-count" class="value">0</span></span>
+    <span>TPS: <span id="tps" class="value">-</span></span>
+  </div>
+</header>
+<div class="main">
+  <div class="canvas-wrap">
+    <canvas id="arena"></canvas>
+  </div>
+  <div class="sidebar">
+    <div class="scoreboard">
+      <h2>Score</h2>
+      <div class="team-score">
+        <span class="team-0">Blue Team</span>
+        <span class="team-0" id="score-0">0</span>
+      </div>
+      <div class="team-score">
+        <span class="team-1">Red Team</span>
+        <span class="team-1" id="score-1">0</span>
+      </div>
+    </div>
+    <h2>Entities</h2>
+    <ul class="entity-list" id="entity-list"></ul>
+    <h2 style="margin-top: 16px;">Kill Feed</h2>
+    <ul class="kill-feed" id="kill-feed"></ul>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('arena');
+const ctx = canvas.getContext('2d');
+const connStatus = document.getElementById('conn-status');
+const tickCount = document.getElementById('tick-count');
+const entityCount = document.getElementById('entity-count');
+const tpsEl = document.getElementById('tps');
+const entityListEl = document.getElementById('entity-list');
+const killFeedEl = document.getElementById('kill-feed');
+const score0El = document.getElementById('score-0');
+const score1El = document.getElementById('score-1');
+
+const TEAM_COLORS = ['#60a5fa', '#f87171', '#4ade80', '#facc15'];
+const TEAM_COLORS_DIM = ['#1e3a5f', '#5f1e1e', '#1e5f2e', '#5f5a1e'];
+
+let state = { entities: [], tick: 0 };
+let prevState = { entities: [], tick: 0 };
+let arenaWidth = 1000;
+let arenaHeight = 1000;
+let kills = [];
+let score = [0, 0];
+let lastSnapshotTime = 0;
+let snapshotCount = 0;
+let currentTps = 0;
+let entityIdMap = {};
+let damageFlashes = [];
+let shotTraces = [];
+
+function resize() {
+  const wrap = canvas.parentElement;
+  const maxW = wrap.clientWidth - 32;
+  const maxH = wrap.clientHeight - 32;
+  const aspect = arenaWidth / arenaHeight;
+
+  let w, h;
+  if (maxW / maxH > aspect) {
+    h = maxH;
+    w = h * aspect;
+  } else {
+    w = maxW;
+    h = w / aspect;
+  }
+  canvas.width = Math.floor(w);
+  canvas.height = Math.floor(h);
+}
+
+function toCanvas(x, y) {
+  return [
+    (x / arenaWidth) * canvas.width,
+    (y / arenaHeight) * canvas.height,
+  ];
+}
+
+function draw() {
+  const w = canvas.width;
+  const h = canvas.height;
+
+  ctx.fillStyle = '#0d0d14';
+  ctx.fillRect(0, 0, w, h);
+
+  // Grid
+  ctx.strokeStyle = '#151520';
+  ctx.lineWidth = 1;
+  const gridStep = 100;
+  for (let x = 0; x <= arenaWidth; x += gridStep) {
+    const [cx] = toCanvas(x, 0);
+    ctx.beginPath();
+    ctx.moveTo(cx, 0);
+    ctx.lineTo(cx, h);
+    ctx.stroke();
+  }
+  for (let y = 0; y <= arenaHeight; y += gridStep) {
+    const [, cy] = toCanvas(0, y);
+    ctx.beginPath();
+    ctx.moveTo(0, cy);
+    ctx.lineTo(w, cy);
+    ctx.stroke();
+  }
+
+  // Obstacles (from config — hardcoded for now, could fetch from API)
+  ctx.fillStyle = '#1e1e2e';
+  ctx.strokeStyle = '#2a2a3a';
+  ctx.lineWidth = 1;
+  for (const obs of getObstacles()) {
+    const [ox, oy] = toCanvas(obs.x, obs.y);
+    const ow = (obs.width / arenaWidth) * w;
+    const oh = (obs.height / arenaHeight) * h;
+    ctx.fillRect(ox, oy, ow, oh);
+    ctx.strokeRect(ox, oy, ow, oh);
+  }
+
+  // Shot traces
+  shotTraces = shotTraces.filter(t => {
+    t.alpha -= 0.06;
+    if (t.alpha <= 0) return false;
+    const [ox, oy] = toCanvas(t.ox, t.oy);
+    const [ex, ey] = toCanvas(t.ex, t.ey);
+    ctx.beginPath();
+    ctx.moveTo(ox, oy);
+    ctx.lineTo(ex, ey);
+    ctx.strokeStyle = t.hit
+      ? `rgba(255, 200, 50, ${t.alpha})`
+      : `rgba(255, 255, 255, ${t.alpha * 0.4})`;
+    ctx.lineWidth = t.hit ? 2 : 1;
+    ctx.stroke();
+    return true;
+  });
+
+  // Damage flashes
+  damageFlashes = damageFlashes.filter(f => {
+    f.alpha -= 0.03;
+    if (f.alpha <= 0) return false;
+    const [cx, cy] = toCanvas(f.x, f.y);
+    ctx.beginPath();
+    ctx.arc(cx, cy, 25 * (1 - f.alpha), 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255, 100, 100, ${f.alpha * 0.4})`;
+    ctx.fill();
+    return true;
+  });
+
+  // Entities
+  for (const e of state.entities) {
+    const [cx, cy] = toCanvas(e.position[0], e.position[1]);
+    const color = TEAM_COLORS[e.team] || '#fff';
+    const dimColor = TEAM_COLORS_DIM[e.team] || '#333';
+    const radius = e.is_dead ? 6 : 10;
+
+    if (e.is_dead) {
+      ctx.globalAlpha = 0.3;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+      ctx.fillStyle = dimColor;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      continue;
+    }
+
+    // FOV cone
+    const fovAngle = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, 40, e.facing - fovAngle, e.facing + fovAngle);
+    ctx.closePath();
+    ctx.fillStyle = `${dimColor}88`;
+    ctx.fill();
+
+    // Body
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Facing indicator
+    const fx = cx + Math.cos(e.facing) * 16;
+    const fy = cy + Math.sin(e.facing) * 16;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(fx, fy);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Health bar
+    const barW = 24;
+    const barH = 3;
+    const barX = cx - barW / 2;
+    const barY = cy - radius - 8;
+    const hpPct = Math.max(0, e.health / e.max_health);
+
+    ctx.fillStyle = '#1e1e2e';
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.fillStyle = hpPct > 0.5 ? '#22c55e' : hpPct > 0.25 ? '#eab308' : '#ef4444';
+    ctx.fillRect(barX, barY, barW * hpPct, barH);
+
+    // Velocity trail
+    if (e.velocity) {
+      const speed = Math.sqrt(e.velocity[0] ** 2 + e.velocity[1] ** 2);
+      if (speed > 10) {
+        const trailX = cx - (e.velocity[0] / arenaWidth) * w * 0.05;
+        const trailY = cy - (e.velocity[1] / arenaHeight) * h * 0.05;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(trailX, trailY);
+        ctx.strokeStyle = `${dimColor}aa`;
+        ctx.lineWidth = 3;
+        ctx.stroke();
+      }
+    }
+  }
+
+  requestAnimationFrame(draw);
+}
+
+let obstacles = [];
+
+function getObstacles() {
+  return obstacles;
+}
+
+function updateEntityList() {
+  const alive = state.entities.filter(e => !e.is_dead);
+  const dead = state.entities.filter(e => e.is_dead);
+
+  entityListEl.innerHTML = state.entities
+    .sort((a, b) => a.team - b.team || a.id - b.id)
+    .map(e => {
+      const color = TEAM_COLORS[e.team] || '#fff';
+      const hpPct = Math.max(0, e.health / e.max_health) * 100;
+      const hpColor = hpPct > 50 ? '#22c55e' : hpPct > 25 ? '#eab308' : '#ef4444';
+      const opacity = e.is_dead ? '0.3' : '1';
+      const label = e.is_dead ? 'DEAD' : `${Math.round(e.health)}`;
+      return `<li style="opacity:${opacity}">
+        <span style="color:${color};width:16px;display:inline-block">&#9679;</span>
+        <span style="color:#666;width:30px;display:inline-block">${label}</span>
+        <div class="hp-bar">
+          <div class="hp-fill" style="width:${hpPct}%;background:${hpColor}"></div>
+        </div>
+      </li>`;
+    })
+    .join('');
+}
+
+function addKill(tick, killerId, victimId) {
+  const killerTeam = entityIdMap[killerId]?.team ?? 0;
+  const victimTeam = entityIdMap[victimId]?.team ?? 1;
+  const kColor = TEAM_COLORS[killerTeam] || '#fff';
+  const vColor = TEAM_COLORS[victimTeam] || '#fff';
+
+  if (victimTeam < score.length) {
+    score[killerTeam === victimTeam ? victimTeam : (victimTeam === 0 ? 1 : 0)] += 0;
+    score[killerTeam] = (score[killerTeam] || 0) + 1;
+    score0El.textContent = score[0];
+    score1El.textContent = score[1];
+  }
+
+  kills.unshift({ tick, killerId, victimId, kColor, vColor });
+  if (kills.length > 20) kills.pop();
+
+  killFeedEl.innerHTML = kills
+    .map(k => `<li>
+      <span class="tick-num">[${k.tick}]</span>
+      <span style="color:${k.kColor}">${shortId(k.killerId)}</span>
+      <span style="color:#444"> killed </span>
+      <span style="color:${k.vColor}">${shortId(k.victimId)}</span>
+    </li>`)
+    .join('');
+}
+
+function shortId(id) {
+  return '#' + (id % 10000).toString().padStart(4, '0');
+}
+
+function handleDamage(event) {
+  const target = entityIdMap[event.target];
+  if (target) {
+    damageFlashes.push({
+      x: target.position[0],
+      y: target.position[1],
+      alpha: 1,
+    });
+  }
+}
+
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws/observe`);
+
+  ws.onopen = () => {
+    connStatus.textContent = 'connected';
+    connStatus.className = 'live';
+  };
+
+  ws.onclose = () => {
+    connStatus.textContent = 'disconnected';
+    connStatus.style.color = '#ef4444';
+    setTimeout(connect, 2000);
+  };
+
+  ws.onerror = () => {
+    connStatus.textContent = 'error';
+    connStatus.style.color = '#ef4444';
+  };
+
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+
+      if (data.type === 'WorldSnapshot') {
+        prevState = { ...state };
+        state = { entities: data.entities, tick: data.tick };
+        tickCount.textContent = data.tick;
+        entityCount.textContent = data.entities.length;
+
+        for (const e of data.entities) {
+          entityIdMap[e.id] = e;
+        }
+
+        snapshotCount++;
+        const now = performance.now();
+        if (now - lastSnapshotTime > 1000) {
+          currentTps = Math.round(snapshotCount / ((now - lastSnapshotTime) / 1000));
+          tpsEl.textContent = currentTps;
+          snapshotCount = 0;
+          lastSnapshotTime = now;
+        }
+
+        updateEntityList();
+      } else if (data.type === 'Kill') {
+        addKill(data.tick, data.killer, data.victim);
+      } else if (data.type === 'Damage') {
+        handleDamage(data);
+      } else if (data.type === 'ShotFired') {
+        const range = 500;
+        const ex = data.origin[0] + data.direction[0] * range;
+        const ey = data.origin[1] + data.direction[1] * range;
+        shotTraces.push({
+          ox: data.origin[0], oy: data.origin[1],
+          ex, ey,
+          hit: data.hit_target !== null,
+          alpha: 1,
+        });
+      }
+    } catch (e) {
+      // ignore parse errors
+    }
+  };
+}
+
+// Fetch config to get arena dimensions and obstacles
+fetch('/api/config')
+  .then(r => r.json())
+  .then(cfg => {
+    document.querySelector('header h1').textContent = `GHOSTLOBBY  //  ${cfg.title.toUpperCase()}`;
+    arenaWidth = cfg.arena.width;
+    arenaHeight = cfg.arena.height;
+    obstacles = cfg.obstacles || [];
+    resize();
+  })
+  .catch(() => {});
+
+window.addEventListener('resize', resize);
+resize();
+connect();
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>

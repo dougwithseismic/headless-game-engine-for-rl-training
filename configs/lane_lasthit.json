@@ -1,0 +1,33 @@
+{
+  "title": "moba-lane",
+  "tick_rate": 64,
+  "arena": {
+    "width": 2000.0,
+    "height": 400.0
+  },
+  "movement": {
+    "max_speed": 150.0,
+    "acceleration": 600.0,
+    "friction": 500.0
+  },
+  "combat": {
+    "default_weapon": {
+      "damage": 50.0,
+      "fire_rate": 0.5,
+      "range": 250.0
+    }
+  },
+  "spawning": {
+    "respawn_delay": 8.0
+  },
+  "teams": {
+    "count": 2,
+    "players_per_team": 1
+  },
+  "obstacles": [],
+  "extra": {
+    "creep_interval": 5.0,
+    "creeps_per_wave": 4,
+    "creep_hp": 60.0
+  }
+}

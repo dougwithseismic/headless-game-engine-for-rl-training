@@ -1,159 +1,235 @@
-# Turborepo starter
+# GhostLobby
 
-This Turborepo starter is maintained by the Turborepo core team.
+Headless game engine for RL agent training. Define a game scenario, get a Gymnasium-compatible environment running at 230K+ ticks/sec.
 
-## Using this example
+Built in Rust (Bevy ECS + Rapier2D physics), with Python bindings via PyO3. Ships with FPS deathmatch, MOBA lane, and racing scenarios. Add your own by implementing one trait.
 
-Run the following command:
+## Quick Start
 
-```sh
-npx create-turbo@latest
+```bash
+# Build
+cargo build
+
+# Run tests (61 tests)
+cargo test -p ghostlobby-engine
+
+# Benchmark (1M ticks)
+cargo run --example benchmark --release -p ghostlobby-engine
+
+# Start server with web viewer
+cargo run --bin ghostlobby-server
+# Open http://localhost:3000
 ```
 
-## What's inside?
+### Python / RL Training
 
-This Turborepo includes the following packages/apps:
+```bash
+# Set up Python environment
+python3 -m venv .venv && source .venv/bin/activate
+pip install maturin numpy gymnasium stable-baselines3
 
-### Apps and Packages
+# Build the Python module
+cd crates/py && maturin develop --release && cd ../..
 
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
+# Train an agent
+python python/train.py --config configs/1v1_deathmatch.json --timesteps 500000
 
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
+# Evaluate a trained model
+python python/evaluate.py --model runs/<your_run>/final_model.zip --episodes 5
 
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo build
+# View training dashboard
+tensorboard --logdir runs/
 ```
 
-Without global `turbo`, use your package manager:
+### Python API
 
-```sh
-cd my-turborepo
-npx turbo build
-pnpm dlx turbo build
-pnpm exec turbo build
+```python
+import ghostlobby
+
+env = ghostlobby.GhostLobbyEnv("configs/oval_race.json", scenario="racing")
+
+obs, info = env.reset()
+# obs = {0: {"self_features": [...], "track_waypoints": [...]}, 1: {...}, ...}
+
+actions = {i: [0.0, 1.0, 0.0] for i in env.agents()}
+obs, rewards, terminated, truncated, infos = env.step(actions)
+
+env.action_space()        # head definitions + total_size
+env.observation_space()   # feature names + shapes
+env.agents()              # [0, 1, 2, 3]
 ```
 
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+## Architecture
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+```
+crates/
+  engine/      Core simulation -- Bevy ECS, Rapier2D physics, scenarios, observations, rewards
+  server/      Axum HTTP/WebSocket server with live web viewer
+  telemetry/   Event sinks (WebSocket broadcast, JSONL file, in-memory buffer)
+  py/          PyO3 Python bindings -- GhostLobbyEnv
 
-```sh
-turbo build --filter=docs
+python/        Gymnasium wrapper, SB3 training script, evaluation script
+configs/       Game configuration JSONs
+web/           Canvas 2D top-down viewer (connects via WebSocket)
 ```
 
-Without global `turbo`:
+### Engine Phases
 
-```sh
-npx turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
+Each tick runs through ordered system sets. Core systems are always present; scenarios register their own into the appropriate phase.
+
+```
+ClearBuffers -> AiDecisions -> PrePhysics -> PhysicsStep -> PostPhysics -> GameLogic -> StateTransitions -> Telemetry
 ```
 
-### Develop
+**Core systems** (engine provides): clear buffers, run scripted AI, sync actions to Rapier, step physics, sync positions back to ECS, emit telemetry snapshots.
 
-To develop all apps and packages, run the following command:
+**Scenario systems** (scenario registers): combat, death/respawn, vehicle physics, checkpoint tracking, creep spawning -- whatever the game needs.
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
+### Scenario Trait
 
-```sh
-cd my-turborepo
-turbo dev
+A scenario defines a complete game -- what entities exist, what actions are available, what the agent observes, and how rewards work.
+
+```rust
+pub trait Scenario: Send + Sync {
+    fn name(&self) -> &str;
+    fn action_space(&self, config: &GameConfig) -> ActionSpaceDef;
+    fn observation_space(&self, config: &GameConfig) -> ObservationSpaceDef;
+    fn setup(&self, world: &mut World, config: &GameConfig, physics: &mut PhysicsState);
+    fn register_systems(&self, schedule: &mut Schedule);
+    fn observe(&self, world: &World, agent: Entity, writer: &mut ObsWriter);
+    fn reward(&self, world: &World, agent: Entity) -> f32;
+    fn is_done(&self, world: &World, agent: Entity) -> bool;
+}
 ```
 
-Without global `turbo`, use your package manager:
+### Action Spaces
 
-```sh
-cd my-turborepo
-npx turbo dev
-pnpm exec turbo dev
-pnpm exec turbo dev
+Actions are flat `Vec<f32>` arrays with multi-head definitions. Each scenario defines its own layout:
+
+| Scenario | Heads | Total |
+|----------|-------|-------|
+| FPS Deathmatch | `move_dir(2)`, `look_angle(1)`, `shoot(discrete 2)` | 4 |
+| Racing | `steer(1)`, `throttle(1)`, `brake(discrete 2)` | 3 |
+| MOBA Lane | `move_dir(2)`, `look_angle(1)`, `shoot(discrete 2)` | 4 |
+
+RL agents send flat arrays. Scripted bots produce the same format. The engine doesn't care who's driving.
+
+## Scenarios
+
+### FPS Deathmatch
+
+Team-based arena combat with hitscan weapons. Agents move, aim, and shoot. Rapier handles collision with walls and obstacles. Raycast combat with line-of-sight occlusion.
+
+```bash
+cargo run --bin ghostlobby-server -- configs/arena_deathmatch.json    # 5v5
+cargo run --bin ghostlobby-server -- configs/1v1_deathmatch.json      # 1v1
 ```
 
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+### Racing
 
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
+Oval track with vehicle physics (steering, throttle, braking). 4 checkpoints around the track, 3 laps to win. Cars collide with walls and each other via Rapier.
 
-```sh
-turbo dev --filter=web
+```bash
+cargo run --bin ghostlobby-server -- configs/oval_race.json
 ```
 
-Without global `turbo`:
+### MOBA Lane
 
-```sh
-npx turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
+1v1 in a narrow lane with AI-controlled creep waves. Creeps spawn periodically and march toward the enemy base.
+
+```bash
+cargo run --bin ghostlobby-server -- configs/lane_lasthit.json
 ```
 
-### Remote Caching
+## Training
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
+The training pipeline uses Stable Baselines3 with PPO. Each run creates a self-contained experiment directory.
 
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended):
-
-```sh
-cd my-turborepo
-turbo login
+```bash
+python python/train.py \
+  --config configs/1v1_deathmatch.json \
+  --scenario fps \
+  --timesteps 1000000 \
+  --lr 3e-4 \
+  --frame-skip 4 \
+  --name my_experiment
 ```
 
-Without global `turbo`, use your package manager:
+This creates:
 
-```sh
-cd my-turborepo
-npx turbo login
-pnpm exec turbo login
-pnpm exec turbo login
+```
+runs/my_experiment_2026-05-05_14-30/
+  experiment.json          Full config snapshot for reproducibility
+  tensorboard/             TensorBoard event logs
+  checkpoints/
+    model_50000_steps.zip  Periodic checkpoints
+    model_100000_steps.zip
+  best_model/              Best model from evaluation callbacks
+  eval_logs/               Evaluation results
+  final_model.zip          Final trained model
 ```
 
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
+Resume from a checkpoint:
 
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
-
-With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed:
-
-```sh
-turbo link
+```bash
+python python/train.py \
+  --resume runs/my_experiment_2026-05-05_14-30/checkpoints/model_50000_steps.zip \
+  --timesteps 500000
 ```
 
-Without global `turbo`:
+Compare experiments in TensorBoard:
 
-```sh
-npx turbo link
-pnpm exec turbo link
-pnpm exec turbo link
+```bash
+tensorboard --logdir runs/
+# Open http://localhost:6006
 ```
 
-## Useful Links
+Evaluate a trained model:
 
-Learn more about the power of Turborepo:
+```bash
+python python/evaluate.py --model runs/my_experiment_2026-05-05_14-30/final_model.zip --episodes 10
+```
 
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+## Server API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/health` | GET | Liveness check |
+| `/api/match` | GET | Current tick, title, status |
+| `/api/match/reset` | POST | Reset simulation |
+| `/api/config` | GET | Full game config as JSON |
+| `/ws/observe` | WS | Read-only telemetry stream |
+| `/ws/play` | WS | Send actions: `{"source_id": 0, "actions": [0.5, 0.3, 1.2, 0.0]}` |
+
+## Adding a New Scenario
+
+1. Create `crates/engine/src/scenarios/your_game.rs`
+2. Define game-specific components and resources
+3. Implement the `Scenario` trait (8 methods)
+4. Register your systems into `EnginePhase` sets
+5. Add `pub mod your_game` to `crates/engine/src/scenarios/mod.rs`
+6. Add a config JSON in `configs/`
+7. Add scenario detection in `crates/server/src/tick_loop.rs` and `crates/py/src/lib.rs`
+
+No changes to the core engine required. The scenario owns its action space, observation space, game logic, rewards, and win conditions.
+
+## Performance
+
+Benchmark on Apple M-series (1M ticks, 10 agents, arena with obstacles):
+
+```
+Ticks/sec:   230,000+
+us/tick:     ~4.3
+```
+
+Training throughput with SB3 PPO (includes Python + PyTorch overhead):
+
+```
+Steps/sec:   ~4,000 (single env)
+```
+
+## Dependencies
+
+**Rust**: bevy_ecs 0.16, rapier2d 0.22, glam 0.29, axum 0.8, tokio, serde, pyo3 0.25
+
+**Python**: gymnasium, stable-baselines3, numpy, maturin (build only)

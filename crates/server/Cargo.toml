@@ -1,0 +1,17 @@
+[package]
+name = "ghostlobby-server"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+ghostlobby-engine = { path = "../engine" }
+ghostlobby-telemetry = { path = "../telemetry" }
+bevy_ecs = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+futures-util = { workspace = true }
