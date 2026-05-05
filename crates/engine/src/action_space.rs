@@ -85,6 +85,21 @@ impl RawActionBuffer {
 }
 
 #[derive(Resource, Debug, Clone, Default)]
+pub struct PendingActions {
+    pub actions: HashMap<Entity, ActionDict>,
+}
+
+impl PendingActions {
+    pub fn insert(&mut self, entity: Entity, action: ActionDict) {
+        self.actions.insert(entity, action);
+    }
+
+    pub fn drain(&mut self) -> HashMap<Entity, ActionDict> {
+        std::mem::take(&mut self.actions)
+    }
+}
+
+#[derive(Resource, Debug, Clone, Default)]
 pub struct ActionMaskBuffer {
     pub masks: HashMap<Entity, Vec<bool>>,
 }

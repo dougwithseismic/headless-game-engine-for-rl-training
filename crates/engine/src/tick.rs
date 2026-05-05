@@ -3,13 +3,15 @@ use std::collections::HashMap;
 use bevy_ecs::prelude::*;
 use glam::Vec2;
 
-use crate::action_space::{ActionDict, ActionMaskBuffer, ActionSpaceDef, RawActionBuffer};
+use crate::action_space::{
+    ActionDict, ActionMaskBuffer, ActionSpaceDef, PendingActions, RawActionBuffer,
+};
 use crate::builder::EngineBuilder;
 use crate::config::GameConfig;
 use crate::ecs::components::Agent;
 use crate::ecs::resources::*;
 use crate::ecs::systems;
-use crate::observation::{AgentRegistry, ObsWriter, ObservationSpaceDef, RewardBuffer};
+use crate::observation::{AgentRegistry, ObsWriter, ObservationSpaceDef, RewardBuffer, ShotEventBuffer};
 use crate::physics::PhysicsState;
 use crate::scenario::{self, Scenario};
 use crate::scripted_ai;
@@ -69,8 +71,10 @@ impl TickRunner {
         world.insert_resource(scenario.action_space(&config));
         world.insert_resource(scenario.observation_space(&config));
         world.insert_resource(RawActionBuffer::default());
+        world.insert_resource(PendingActions::default());
         world.insert_resource(ActionMaskBuffer::default());
         world.insert_resource(RewardBuffer::default());
+        world.insert_resource(ShotEventBuffer::default());
 
         let agents = Self::collect_agents(&mut world);
         let max_agents = agents.len();
@@ -115,9 +119,22 @@ impl TickRunner {
         );
     }
 
+    fn flush_pending_actions(
+        mut pending: ResMut<PendingActions>,
+        mut raw_buffer: ResMut<RawActionBuffer>,
+    ) {
+        for (entity, action) in pending.drain() {
+            raw_buffer.insert(entity, action);
+        }
+    }
+
     fn add_core_systems(schedule: &mut Schedule) {
         schedule.add_systems(systems::clear_buffers.in_set(EnginePhase::ClearBuffers));
-        schedule.add_systems(scripted_ai::run_scripted_ai.in_set(EnginePhase::AiDecisions));
+        schedule.add_systems(
+            (scripted_ai::run_scripted_ai, Self::flush_pending_actions)
+                .chain()
+                .in_set(EnginePhase::AiDecisions),
+        );
         schedule.add_systems(
             systems::sync_actions_to_physics.in_set(EnginePhase::PrePhysics),
         );
@@ -150,9 +167,9 @@ impl TickRunner {
     }
 
     pub fn apply_raw_actions(&mut self, actions: HashMap<Entity, ActionDict>) {
-        let mut buffer = self.world.resource_mut::<RawActionBuffer>();
+        let mut pending = self.world.resource_mut::<PendingActions>();
         for (entity, action) in actions {
-            buffer.insert(entity, action);
+            pending.insert(entity, action);
         }
     }
 

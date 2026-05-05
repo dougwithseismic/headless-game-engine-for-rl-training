@@ -61,6 +61,27 @@ impl AgentRegistry {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ShotEvent {
+    pub shooter: Entity,
+    pub origin: glam::Vec2,
+}
+
+#[derive(Resource, Debug, Clone, Default)]
+pub struct ShotEventBuffer {
+    pub events: Vec<ShotEvent>,
+}
+
+impl ShotEventBuffer {
+    pub fn push(&mut self, shooter: Entity, origin: glam::Vec2) {
+        self.events.push(ShotEvent { shooter, origin });
+    }
+
+    pub fn clear(&mut self) {
+        self.events.clear();
+    }
+}
+
 #[derive(Resource, Debug, Clone, Default)]
 pub struct RewardBuffer {
     pub rewards: HashMap<Entity, f32>,

@@ -33,6 +33,12 @@ pub struct MovementConfig {
     pub max_speed: f32,
     pub acceleration: f32,
     pub friction: f32,
+    #[serde(default = "default_turn_rate")]
+    pub turn_rate: f32,
+}
+
+fn default_turn_rate() -> f32 {
+    8.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

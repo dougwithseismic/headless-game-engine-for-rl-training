@@ -34,6 +34,11 @@ python python/train.py --config configs/1v1_deathmatch.json --timesteps 500000
 
 # Evaluate a trained model
 python python/evaluate.py --model runs/<run>/final_model.zip --episodes 5
+
+# Web app (React 19 viewer)
+cd web-app && pnpm dev              # dev server on :5173, proxies to :3000
+cd web-app && pnpm build            # production build
+cd web-app && npx tsc --noEmit      # type check
 ```
 
 ## Architecture
@@ -79,4 +84,44 @@ Cargo workspace with 4 crates:
 
 ## Web Viewer
 
-`web/index.html` -- standalone Canvas 2D top-down viewer. Connects to `/ws/observe`, renders entity positions, health bars, shot traces, kill feed. No build step required.
+Two viewer implementations exist:
+
+**`web/index.html`** -- Original standalone Canvas 2D viewer. No build step, served directly by the Rust server at `http://localhost:3000`.
+
+**`web-app/`** -- React 19 + TypeScript app (Vite, zustand, React Query). Full port of the original viewer with proper component architecture.
+
+```bash
+# Dev server (proxies /api/* and /ws/* to Rust server on :3000)
+cd web-app && pnpm dev    # http://localhost:5173
+
+# Production build
+cd web-app && pnpm build  # outputs to web-app/dist/
+
+# Type check
+cd web-app && npx tsc --noEmit
+```
+
+### React App Architecture
+
+The app splits **React-rendered UI** from the **imperative Canvas draw loop**:
+
+- **React components** (re-render on state change): Header, Sidebar panels (Scoreboard, AgentList, KillFeed, Terminal), HUD overlays, FollowBanner, ZoomIndicator, EntityTooltip
+- **Canvas draw loop** (60fps via rAF, reads zustand via `getState()`): All canvas rendering -- entities, effects, fog, minimap. Lives in `src/renderer/` as pure functions, not React components.
+- **Mutable refs** (never trigger re-renders): particles, shotTraces, dmgNumbers, decals, ripples, prevPositions. Stored in an `EffectsState` ref passed between hooks.
+
+### Zustand Stores (`src/stores/`)
+
+- **game-store** -- entities, tick, entityIdMap, kills (max 12), score[], eventLog (max 200), tps, connected. Updated by WebSocket events.
+- **camera-store** -- camX/Y, camZoom (1.0-8.0), followId, isPanning, shakeX/Y/Decay. Read by draw loop via `getState()`, written by camera controls hook.
+- **render-store** -- fog/glow/grid/trails booleans. Toggled by CanvasControls buttons.
+
+### Key Hooks (`src/hooks/`)
+
+- **use-websocket** -- Connects to `/ws/observe`, dispatches events to zustand stores and effects ref. WorldSnapshot updates are rAF-gated to throttle React re-renders.
+- **use-canvas-renderer** -- Owns the `requestAnimationFrame` draw loop. Calls renderer functions sequentially. Reads stores non-reactively.
+- **use-camera-controls** -- Wheel/click/drag/keyboard handlers for zoom, pan, follow, and shortcuts (1-9 to select agents, Esc to reset).
+- **use-game-config** -- React Query fetch of `/api/config` with `staleTime: Infinity`.
+
+### Renderer (`src/renderer/`)
+
+Pure imperative Canvas2D functions, each taking `ctx`, camera params, and data. Not React components. Pipeline order: background → arena bounds → grid → obstacles → decals → ambient → ripples → shots → particles → entities → damage numbers → fog → minimap.

@@ -41,3 +41,14 @@ impl TelemetryBuffer {
 
 #[derive(Resource, Debug, Clone)]
 pub struct GameConfigResource(pub GameConfig);
+
+#[derive(Resource, Debug, Clone)]
+pub struct RoundState {
+    pub reset_timer: Option<f32>,
+}
+
+impl Default for RoundState {
+    fn default() -> Self {
+        Self { reset_timer: None }
+    }
+}

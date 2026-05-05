@@ -142,14 +142,13 @@ mod integration {
     }
 
     // -----------------------------------------------------------------------
-    // 6. Observation shapes — self_features=7, action_mask=2
+    // 6. Observation shapes — self_features=11, entities=20, action_mask=2
     // -----------------------------------------------------------------------
     #[test]
     fn observation_shapes() {
         let config = deathmatch_config();
         let mut runner = TickRunner::new(config);
 
-        // Run a tick so observations are populated
         runner.tick();
 
         let observations = runner.observe_all();
@@ -158,8 +157,16 @@ mod integration {
         let self_features = obs.get("self_features").expect("missing self_features");
         assert_eq!(
             self_features.len(),
-            7,
-            "self_features should have 7 values"
+            11,
+            "self_features should have 11 values"
+        );
+
+        let entities = obs.get("entities").expect("missing entities");
+        let max_agents = 2 * 5; // count * players_per_team from deathmatch_config
+        assert_eq!(
+            entities.len(),
+            max_agents * 10,
+            "entities should have max_agents * 10 values"
         );
 
         let action_mask = obs.get("action_mask").expect("missing action_mask");

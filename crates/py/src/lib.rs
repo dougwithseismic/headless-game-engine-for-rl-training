@@ -87,7 +87,6 @@ impl GhostLobbyEnv {
 
         self.runner.apply_raw_actions(engine_actions);
         self.runner.tick();
-        let _ = self.runner.drain_telemetry();
 
         let obs = self.build_obs(py)?;
         let rewards = self.build_rewards(py)?;
@@ -133,6 +132,14 @@ impl GhostLobbyEnv {
 
     fn tick_count(&self) -> u64 {
         self.runner.tick_count()
+    }
+
+    fn drain_telemetry(&mut self) -> PyResult<Vec<String>> {
+        let events = self.runner.drain_telemetry();
+        events
+            .iter()
+            .map(|e| serde_json::to_string(e).map_err(|e| PyValueError::new_err(e.to_string())))
+            .collect()
     }
 }
 

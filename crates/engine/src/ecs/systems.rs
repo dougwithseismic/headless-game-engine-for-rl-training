@@ -1,11 +1,10 @@
 use bevy_ecs::prelude::*;
 use glam::Vec2;
-use rand::Rng;
 
 use crate::action_space::{ActionMaskBuffer, ActionSpaceDef, RawActionBuffer};
 use crate::ecs::components::*;
 use crate::ecs::resources::*;
-use crate::observation::RewardBuffer;
+use crate::observation::{RewardBuffer, ShotEventBuffer};
 use crate::physics::PhysicsState;
 use crate::telemetry::{EntityState, TelemetryEvent};
 
@@ -13,10 +12,12 @@ pub fn clear_buffers(
     mut raw_buffer: ResMut<RawActionBuffer>,
     mut mask_buffer: ResMut<ActionMaskBuffer>,
     mut reward_buffer: ResMut<RewardBuffer>,
+    mut shot_buffer: ResMut<ShotEventBuffer>,
 ) {
     raw_buffer.clear();
     mask_buffer.clear();
     reward_buffer.clear();
+    shot_buffer.clear();
 }
 
 pub fn sync_actions_to_physics(
@@ -66,7 +67,11 @@ pub fn facing_system(
     mut query: Query<(Entity, &mut Facing), Without<Dead>>,
     raw_buffer: Res<RawActionBuffer>,
     action_space: Res<ActionSpaceDef>,
+    tick: Res<TickState>,
+    config: Res<GameConfigResource>,
 ) {
+    let max_turn = config.0.movement.turn_rate * tick.delta;
+
     for (entity, mut facing) in &mut query {
         if let Some(raw) = raw_buffer.get(entity)
             && raw.len() >= action_space.total_size
@@ -74,7 +79,21 @@ pub fn facing_system(
         {
             let look_slice = action_space.extract_head(raw, 1);
             if !look_slice.is_empty() {
-                facing.0 = look_slice[0];
+                let desired = look_slice[0];
+                let mut diff = desired - facing.0;
+                if diff > std::f32::consts::PI {
+                    diff -= 2.0 * std::f32::consts::PI;
+                }
+                if diff < -std::f32::consts::PI {
+                    diff += 2.0 * std::f32::consts::PI;
+                }
+                facing.0 += diff.clamp(-max_turn, max_turn);
+                if facing.0 > std::f32::consts::PI {
+                    facing.0 -= 2.0 * std::f32::consts::PI;
+                }
+                if facing.0 < -std::f32::consts::PI {
+                    facing.0 += 2.0 * std::f32::consts::PI;
+                }
             }
         }
     }
@@ -100,6 +119,7 @@ pub fn combat_system(
     tick: Res<TickState>,
     mut telemetry: ResMut<TelemetryBuffer>,
     mut rewards: ResMut<RewardBuffer>,
+    mut shot_events: ResMut<ShotEventBuffer>,
 ) {
     let mut hits: Vec<(Entity, f32, Entity)> = Vec::new();
 
@@ -176,6 +196,7 @@ pub fn combat_system(
             direction: dir,
             hit_target: best_hit.map(|(e, _)| e.to_bits()),
         });
+        shot_events.push(shooter_entity, shooter_pos.0);
 
         if let Some((hit_entity, _)) = best_hit {
             hits.push((hit_entity, damage, shooter_entity));
@@ -192,7 +213,8 @@ pub fn combat_system(
                 target: hit_entity.to_bits(),
                 amount: damage,
             });
-            rewards.add(shooter_entity, 0.1 * damage / max_hp);
+            rewards.add(shooter_entity, 0.5 * damage / max_hp);
+            rewards.add(hit_entity, -0.3 * damage / max_hp);
         }
         commands
             .entity(hit_entity)
@@ -233,46 +255,88 @@ pub fn death_system(
 #[allow(clippy::type_complexity)]
 pub fn respawn_system(
     mut commands: Commands,
-    mut query: Query<(
-        Entity,
-        &mut Respawning,
-        &mut Health,
-        &mut Position,
-        &Team,
-        &PhysicsHandle,
-    )>,
+    all_agents: Query<
+        (Entity, &Team, &Health, &PhysicsHandle, Option<&Dead>),
+        With<Agent>,
+    >,
+    alive_agents: Query<&Team, (With<Agent>, Without<Dead>)>,
     tick: Res<TickState>,
     bounds: Res<WorldBounds>,
+    config: Res<GameConfigResource>,
+    mut round: ResMut<RoundState>,
     mut physics: ResMut<PhysicsState>,
     mut telemetry: ResMut<TelemetryBuffer>,
 ) {
-    let mut rng = rand::rng();
+    // Check if any team has been fully wiped to trigger the round reset timer
+    if round.reset_timer.is_none() {
+        let team_count = config.0.teams.count;
+        for team_idx in 0..team_count {
+            let any_alive = alive_agents.iter().any(|t| t.0 == team_idx);
+            if !any_alive {
+                let has_members = all_agents.iter().any(|(_, t, _, _, _)| t.0 == team_idx);
+                if has_members {
+                    round.reset_timer = Some(config.0.spawning.respawn_delay);
+                    break;
+                }
+            }
+        }
+    }
 
-    for (entity, mut respawning, mut health, mut pos, team, ph) in &mut query {
-        respawning.timer -= tick.delta;
-        if respawning.timer <= 0.0 {
-            health.current = health.max;
+    // Tick down the reset timer and respawn everyone when it expires
+    if let Some(ref mut timer) = round.reset_timer {
+        *timer -= tick.delta;
+        if *timer > 0.0 {
+            return;
+        }
+
+        let players_per_team = config.0.teams.players_per_team as usize;
+        let spacing = bounds.height / (players_per_team as f32 + 1.0);
+
+        let mut team_counters: [usize; 4] = [0; 4];
+
+        for (entity, team, health, ph, _dead) in &all_agents {
+            let ti = team.0 as usize;
+            let player_idx = team_counters[ti];
+            team_counters[ti] += 1;
 
             let spawn_x = if team.0 == 0 {
-                rng.random_range(50.0..150.0)
+                100.0
             } else {
-                rng.random_range((bounds.width - 150.0)..(bounds.width - 50.0))
+                bounds.width - 100.0
             };
-            let spawn_y = rng.random_range(100.0..(bounds.height - 100.0));
+            let spawn_y = spacing * (player_idx as f32 + 1.0);
             let new_pos = Vec2::new(spawn_x, spawn_y);
-            pos.0 = new_pos;
+            let new_facing = if team.0 == 0 {
+                0.0
+            } else {
+                std::f32::consts::PI
+            };
+
             physics.set_body_position(ph.body, new_pos);
             physics.set_body_linvel(ph.body, Vec2::ZERO);
 
-            commands.entity(entity).remove::<(Dead, Respawning)>();
+            commands.entity(entity).insert((
+                Position(new_pos),
+                Velocity(Vec2::ZERO),
+                Health {
+                    current: health.max,
+                    max: health.max,
+                },
+                Facing(new_facing),
+            ));
+            commands
+                .entity(entity)
+                .remove::<(Dead, Respawning, LastDamageSource)>();
 
             telemetry.push(TelemetryEvent::Spawn {
                 tick: tick.tick,
                 entity: entity.to_bits(),
-                position: pos.0,
+                position: new_pos,
                 team: team.0,
             });
         }
+
+        round.reset_timer = None;
     }
 }
 

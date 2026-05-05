@@ -72,7 +72,7 @@ async fn main() {
         .route("/api/config", get(api::config))
         .route("/ws/observe", get(ws::ws_observe))
         .route("/ws/play", get(ws::ws_play))
-        .fallback_service(ServeDir::new("web"))
+        .fallback_service(ServeDir::new("web-app/dist"))
         .layer(CorsLayer::permissive())
         .with_state(app_state);
 

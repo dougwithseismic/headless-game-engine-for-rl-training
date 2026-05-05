@@ -4,6 +4,7 @@ use glam::Vec2;
 use crate::action_space::{ActionDict, RawActionBuffer};
 use crate::ecs::components::*;
 use crate::ecs::resources::*;
+use crate::physics::PhysicsState;
 
 pub struct AiContext {
     pub my_position: Vec2,
@@ -19,6 +20,7 @@ pub struct AiContext {
     pub arena_height: f32,
     pub enemies: Vec<TargetInfo>,
     pub allies: Vec<TargetInfo>,
+    pub wall_rays: [f32; 8],
 }
 
 pub struct TargetInfo {
@@ -35,28 +37,44 @@ pub struct ScriptedAi(pub AiFn);
 #[allow(clippy::type_complexity)]
 pub fn run_scripted_ai(
     bots: Query<
-        (Entity, &ScriptedAi, &Position, &Velocity, &Team, &Facing, &Health, &Weapon),
+        (Entity, &ScriptedAi, &Position, &Velocity, &Team, &Facing, &Health, &Weapon, &PhysicsHandle),
         Without<Dead>,
     >,
-    targets: Query<(Entity, &Position, &Health, &Team), Without<Dead>>,
+    targets: Query<(Entity, &Position, &Health, &Team, &PhysicsHandle), Without<Dead>>,
     bounds: Res<WorldBounds>,
     tick: Res<TickState>,
+    physics: Res<PhysicsState>,
     mut raw_buffer: ResMut<RawActionBuffer>,
 ) {
-    let all_entities: Vec<(Entity, Vec2, f32, u8)> = targets
+    let all_entities: Vec<_> = targets
         .iter()
-        .map(|(e, p, h, t)| (e, p.0, h.current, t.0))
+        .map(|(e, p, h, t, ph)| (e, p.0, h.current, t.0, ph.collider))
         .collect();
 
-    for (entity, ai, pos, vel, team, facing, health, weapon) in &bots {
+    for (entity, ai, pos, vel, team, facing, health, weapon, bot_ph) in &bots {
         let mut enemies = Vec::new();
         let mut allies = Vec::new();
 
-        for &(e, e_pos, e_health, e_team) in &all_entities {
+        for &(e, e_pos, e_health, e_team, e_collider) in &all_entities {
             if e == entity {
                 continue;
             }
             let distance = pos.0.distance(e_pos);
+
+            let visible = if distance > 0.1 {
+                let dir = (e_pos - pos.0).normalize_or_zero();
+                match physics.cast_ray(pos.0, dir, distance, Some(bot_ph.collider)) {
+                    Some((hit_col, _)) => hit_col == e_collider,
+                    None => true,
+                }
+            } else {
+                true
+            };
+
+            if !visible {
+                continue;
+            }
+
             let info = TargetInfo {
                 position: e_pos,
                 distance,
@@ -66,6 +84,17 @@ pub fn run_scripted_ai(
                 allies.push(info);
             } else {
                 enemies.push(info);
+            }
+        }
+
+        let scan_range = 120.0;
+        let mut wall_rays = [1.0f32; 8];
+        for (i, ray) in wall_rays.iter_mut().enumerate() {
+            let angle = i as f32 * std::f32::consts::FRAC_PI_4;
+            let dir = Vec2::new(angle.cos(), angle.sin());
+            if let Some((_, toi)) = physics.cast_ray(pos.0, dir, scan_range, Some(bot_ph.collider))
+            {
+                *ray = toi / scan_range;
             }
         }
 
@@ -83,6 +112,7 @@ pub fn run_scripted_ai(
             arena_height: bounds.height,
             enemies,
             allies,
+            wall_rays,
         };
 
         let action_dict = (ai.0)(&ctx);
@@ -127,18 +157,29 @@ pub fn aggressive_ai() -> AiFn {
                 -to_enemy
             } else {
                 let perp = Vec2::new(-to_enemy.y, to_enemy.x);
-                let strafe_sign = if ctx.entity_bits.is_multiple_of(2) { 1.0 } else { -1.0 };
-                perp * strafe_sign
+                let phase = (ctx.tick / 90 + ctx.entity_bits) % 3;
+                let strafe_sign = if phase == 0 { 1.0 } else if phase == 1 { -1.0 } else { 0.3 };
+                perp * strafe_sign + to_enemy * 0.2
             };
 
             move_dir = (move_dir + repulsion * 0.5).normalize_or_zero();
 
-            if ctx.my_velocity.length() < 3.0 {
-                let wander_phase = (ctx.tick as f32 * 0.02) + (ctx.entity_bits as f32);
-                move_dir = Vec2::new(wander_phase.cos(), wander_phase.sin());
+            let desired = move_dir;
+            let mut best_score = f32::MIN;
+            let mut best_dir = desired;
+            for i in 0..8 {
+                let a = i as f32 * std::f32::consts::FRAC_PI_4;
+                let dir = Vec2::new(a.cos(), a.sin());
+                let interest = dir.dot(desired);
+                let danger = (1.0 - ctx.wall_rays[i]).max(0.0);
+                let score = interest - danger * 3.0;
+                if score > best_score {
+                    best_score = score;
+                    best_dir = dir;
+                }
             }
 
-            let move_dir = move_dir.normalize_or_zero();
+            let move_dir = best_dir;
             let shoot = if dist <= ctx.weapon_range && ctx.weapon_cooldown <= 0.0 {
                 1.0
             } else {
@@ -147,10 +188,31 @@ pub fn aggressive_ai() -> AiFn {
 
             vec![move_dir.x, move_dir.y, angle, shoot]
         } else {
-            let wander_phase = (ctx.tick as f32 * 0.01) + (ctx.entity_bits as f32);
-            let dir = Vec2::new(wander_phase.cos(), wander_phase.sin());
-            let angle = dir.y.atan2(dir.x);
-            vec![dir.x, dir.y, angle, 0.0]
+            let epoch = ctx.tick / 128;
+            let hash = (epoch.wrapping_mul(2654435761) ^ ctx.entity_bits) as f32;
+            let margin = 80.0;
+            let goal = Vec2::new(
+                margin + (hash % 1000.0) / 1000.0 * (ctx.arena_width - margin * 2.0),
+                margin + ((hash / 7.0) % 1000.0) / 1000.0 * (ctx.arena_height - margin * 2.0),
+            );
+            let to_goal = (goal - ctx.my_position).normalize_or_zero();
+
+            let mut best_score = f32::MIN;
+            let mut best_dir = to_goal;
+            for i in 0..8 {
+                let a = i as f32 * std::f32::consts::FRAC_PI_4;
+                let dir = Vec2::new(a.cos(), a.sin());
+                let interest = dir.dot(to_goal);
+                let danger = (1.0 - ctx.wall_rays[i]).max(0.0);
+                let score = interest - danger * 3.0;
+                if score > best_score {
+                    best_score = score;
+                    best_dir = dir;
+                }
+            }
+
+            let angle = best_dir.y.atan2(best_dir.x);
+            vec![best_dir.x, best_dir.y, angle, 0.0]
         }
     })
 }
