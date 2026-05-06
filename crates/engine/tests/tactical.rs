@@ -88,18 +88,18 @@ fn agents_count() {
 }
 
 // -----------------------------------------------------------------------
-// 3. Action space — discrete(12) + continuous(1) + discrete(2) = 3
+// 3. Action space — discrete(12) + continuous(1) + discrete(2) + discrete(2) = 4
 // -----------------------------------------------------------------------
 #[test]
 fn action_space_shape() {
     let runner = build_tactical(tactical_open_config());
     let space = runner.action_space_def();
-    assert_eq!(space.heads.len(), 3, "expected 3 action heads");
-    assert_eq!(space.total_size, 3, "move_target(1) + aim_delta(1) + shoot(1) = 3");
+    assert_eq!(space.heads.len(), 4, "expected 4 action heads (move, aim, shoot, weapon_select)");
+    assert_eq!(space.total_size, 4, "move_target(1) + aim_delta(1) + shoot(1) + weapon_select(1) = 4");
 }
 
 // -----------------------------------------------------------------------
-// 4. Observation space — verify all 7 features exist
+// 4. Observation space — verify all 8 features exist (including weapon_state)
 // -----------------------------------------------------------------------
 #[test]
 fn observation_space_features() {
@@ -107,7 +107,7 @@ fn observation_space_features() {
     let obs_space = runner.observation_space_def();
     let names: Vec<&str> = obs_space.features.iter().map(|f| f.name.as_str()).collect();
 
-    for expected in &["self_state", "enemy_state", "raycasts", "candidates", "context", "audio", "action_mask"] {
+    for expected in &["self_state", "weapon_state", "enemy_state", "raycasts", "candidates", "context", "audio", "action_mask"] {
         assert!(names.contains(expected), "missing feature: {expected}");
     }
 }
@@ -124,16 +124,17 @@ fn observation_shapes() {
     let agent0 = obs.get(&0).expect("missing agent 0 obs");
 
     assert_eq!(agent0["self_state"].len(), 8, "self_state should be 8");
+    assert_eq!(agent0["weapon_state"].len(), 8, "weapon_state should be 8");
     assert_eq!(agent0["enemy_state"].len(), 20, "enemy_state should be max_agents * 10 = 20");
     assert_eq!(agent0["raycasts"].len(), 128, "raycasts should be 64 * 2 = 128");
     assert_eq!(agent0["candidates"].len(), 60, "candidates should be 12 * 5 = 60");
     assert_eq!(agent0["context"].len(), 10, "context should be 10");
     assert_eq!(agent0["audio"].len(), 2, "audio should be 2");
-    assert_eq!(agent0["action_mask"].len(), 14, "action_mask should be 14");
+    assert_eq!(agent0["action_mask"].len(), 16, "action_mask should be 16 (12 move + 1 shoot + 1 alive + 2 weapon_select)");
 }
 
 // -----------------------------------------------------------------------
-// 6. Total observation dimensions = 242
+// 6. Total observation dimensions = 252 (was 242, +8 weapon_state, +2 action_mask)
 // -----------------------------------------------------------------------
 #[test]
 fn total_observation_dims() {
@@ -143,7 +144,7 @@ fn total_observation_dims() {
     let obs = runner.observe_all();
     let agent0 = obs.get(&0).unwrap();
     let total: usize = agent0.values().map(|v| v.len()).sum();
-    assert_eq!(total, 242, "total obs dims should be 242");
+    assert_eq!(total, 252, "total obs dims should be 252");
 }
 
 // -----------------------------------------------------------------------
@@ -157,8 +158,8 @@ fn apply_move_target_action() {
     let initial_obs = runner.observe_all();
     let initial_x = initial_obs[&0]["self_state"][0];
 
-    // Action: move_target=2 (East), aim_delta=0, shoot=0
-    let actions = HashMap::from([(agent_entity, vec![2.0, 0.0, 0.0])]);
+    // Action: move_target=2 (East), aim_delta=0, shoot=0, weapon_select=0
+    let actions = HashMap::from([(agent_entity, vec![2.0, 0.0, 0.0, 0.0])]);
 
     for _ in 0..30 {
         runner.apply_raw_actions(actions.clone());
@@ -189,8 +190,8 @@ fn stay_action_keeps_position() {
     let x_before = before[&0]["self_state"][0];
     let y_before = before[&0]["self_state"][1];
 
-    // Action: move_target=8 (Stay), aim_delta=0, shoot=0
-    let actions = HashMap::from([(agent_entity, vec![8.0, 0.0, 0.0])]);
+    // Action: move_target=8 (Stay), aim_delta=0, shoot=0, weapon_select=0
+    let actions = HashMap::from([(agent_entity, vec![8.0, 0.0, 0.0, 0.0])]);
     for _ in 0..20 {
         runner.apply_raw_actions(actions.clone());
         runner.tick();
@@ -323,7 +324,8 @@ fn stability_1000_ticks_with_obstacles() {
             let target = (step % 12) as f32;
             let aim = ((step as f32 * 0.1).sin()).clamp(-1.0, 1.0);
             let shoot = if step % 3 == 0 { 1.0 } else { 0.0 };
-            actions.insert(e, vec![target, aim, shoot]);
+            let weapon_select = if step % 5 == 0 { 1.0 } else { 0.0 };
+            actions.insert(e, vec![target, aim, shoot, weapon_select]);
         }
         runner.apply_raw_actions(actions);
         runner.tick();
@@ -394,5 +396,118 @@ fn tactical_ai_agents_fire_shots() {
     assert!(
         shot_count > 0,
         "tactical AI agents should fire at least some shots in 500 ticks on an open map, got {shot_count}"
+    );
+}
+
+// -----------------------------------------------------------------------
+// 16. Inventory: action space is now size 4
+// -----------------------------------------------------------------------
+#[test]
+fn inventory_action_space_has_4_heads() {
+    let runner = build_tactical(tactical_open_config());
+    let space = runner.action_space_def();
+    assert_eq!(space.heads.len(), 4, "expected 4 heads with weapon_select");
+    assert_eq!(space.total_size, 4, "total_size should be 4");
+    assert_eq!(space.heads[3].name(), "weapon_select");
+}
+
+// -----------------------------------------------------------------------
+// 17. Observation includes weapon_state feature
+// -----------------------------------------------------------------------
+#[test]
+fn observation_includes_weapon_state() {
+    let mut runner = build_tactical(tactical_open_config());
+    runner.tick();
+
+    let obs = runner.observe_all();
+    let agent0 = obs.get(&0).expect("missing agent 0 obs");
+
+    assert!(agent0.contains_key("weapon_state"), "obs should have weapon_state");
+    let weapon_state = &agent0["weapon_state"];
+    assert_eq!(weapon_state.len(), 8, "weapon_state should be 8 floats");
+
+    // First weapon (rifle) should have high ammo (may have fired 1-2 shots in tick 1)
+    assert!(
+        weapon_state[0] > 0.9,
+        "rifle ammo_fraction should be > 0.9 at start, got {}",
+        weapon_state[0]
+    );
+    // is_reloading should be 0
+    assert!(
+        weapon_state[1] < 0.001,
+        "rifle should not be reloading at start"
+    );
+
+    // One-hot: active weapon 0 (rifle) -> [1.0, 0.0]
+    assert!(
+        (weapon_state[6] - 1.0).abs() < 0.001,
+        "one-hot for active weapon 0 should be 1.0, got {}",
+        weapon_state[6]
+    );
+    assert!(
+        weapon_state[7] < 0.001,
+        "one-hot for inactive weapon 1 should be 0.0, got {}",
+        weapon_state[7]
+    );
+}
+
+// -----------------------------------------------------------------------
+// 18. 500-tick run with inventory — no panics, agents switch weapons
+// -----------------------------------------------------------------------
+#[test]
+fn inventory_500_ticks_stability() {
+    let mut runner = build_tactical(tactical_open_config());
+
+    let agent_entities = runner.agent_registry().agents.clone();
+    for step in 0..500 {
+        let mut actions = HashMap::new();
+        for &e in &agent_entities {
+            let target = (step % 12) as f32;
+            let aim = ((step as f32 * 0.1).sin()).clamp(-1.0, 1.0);
+            let shoot = if step % 3 == 0 { 1.0 } else { 0.0 };
+            // Alternate weapon every 50 ticks
+            let weapon_select = if (step / 50) % 2 == 0 { 0.0 } else { 1.0 };
+            actions.insert(e, vec![target, aim, shoot, weapon_select]);
+        }
+        runner.apply_raw_actions(actions);
+        runner.tick();
+    }
+
+    assert_eq!(runner.tick_count(), 500);
+    let obs = runner.observe_all();
+    assert_eq!(obs.len(), 2);
+}
+
+// -----------------------------------------------------------------------
+// 19. Weapon switching via actions updates observation
+// -----------------------------------------------------------------------
+#[test]
+fn weapon_switch_updates_observation() {
+    let mut runner = build_tactical(tactical_open_config());
+    runner.tick();
+
+    // Verify initial active weapon is 0 (rifle)
+    let obs = runner.observe_all();
+    let ws = &obs[&0]["weapon_state"];
+    assert!(
+        (ws[6] - 1.0).abs() < 0.001,
+        "initially weapon 0 (rifle) should be active"
+    );
+
+    // Switch to shotgun for agent 0
+    let agent0 = runner.agent_registry().agents[0];
+    let actions = HashMap::from([(agent0, vec![8.0, 0.0, 0.0, 1.0])]);
+    runner.apply_raw_actions(actions);
+    runner.tick();
+
+    let obs = runner.observe_all();
+    let ws = &obs[&0]["weapon_state"];
+    assert!(
+        ws[7] > 0.5,
+        "after switch, weapon 1 (shotgun) should be active, one-hot[1] = {}", ws[7]
+    );
+    assert!(
+        ws[6] < 0.5,
+        "after switch, weapon 0 (rifle) should be inactive, one-hot[0] = {}", ws[6]
     );
 }

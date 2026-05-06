@@ -13,3 +13,4 @@ pub mod scripted_ai;
 pub mod sensors;
 pub mod telemetry;
 pub mod tick;
+pub mod weapons;

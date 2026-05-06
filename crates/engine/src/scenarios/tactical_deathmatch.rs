@@ -16,6 +16,7 @@ use crate::scripted_ai::{tactical_aggressive_ai, ScriptedAi};
 use crate::sensors;
 use crate::telemetry::TelemetryEvent;
 use crate::tick::EnginePhase;
+use crate::weapons;
 
 pub struct TacticalDeathmatchScenario;
 
@@ -54,6 +55,10 @@ impl Scenario for TacticalDeathmatchScenario {
                 name: "shoot".into(),
                 n: 2,
             },
+            ActionHead::Discrete {
+                name: "weapon_select".into(),
+                n: 2,
+            },
         ])
     }
 
@@ -66,6 +71,10 @@ impl Scenario for TacticalDeathmatchScenario {
             features: vec![
                 ObsFeature {
                     name: "self_state".into(),
+                    shape: vec![8],
+                },
+                ObsFeature {
+                    name: "weapon_state".into(),
                     shape: vec![8],
                 },
                 ObsFeature {
@@ -90,7 +99,7 @@ impl Scenario for TacticalDeathmatchScenario {
                 },
                 ObsFeature {
                     name: "action_mask".into(),
-                    shape: vec![14],
+                    shape: vec![16],
                 },
             ],
         }
@@ -148,6 +157,35 @@ impl Scenario for TacticalDeathmatchScenario {
                 EnemyMemory::default(),
                 PathState::default(),
                 ScriptedAi(tactical_aggressive_ai()),
+                Inventory {
+                    weapons: vec![
+                        WeaponSlot {
+                            weapon_type: WeaponType::Rifle,
+                            damage: 34.0,
+                            fire_rate: 0.3,
+                            range: 400.0,
+                            cooldown_remaining: 0.0,
+                            ammo: 30,
+                            max_ammo: 30,
+                            reload_time: 2.0,
+                            reload_remaining: 0.0,
+                            is_reloading: false,
+                        },
+                        WeaponSlot {
+                            weapon_type: WeaponType::Shotgun,
+                            damage: 15.0,
+                            fire_rate: 0.8,
+                            range: 200.0,
+                            cooldown_remaining: 0.0,
+                            ammo: 8,
+                            max_ammo: 8,
+                            reload_time: 2.5,
+                            reload_remaining: 0.0,
+                            is_reloading: false,
+                        },
+                    ],
+                    active: 0,
+                },
             ));
         }
     }
@@ -161,8 +199,9 @@ impl Scenario for TacticalDeathmatchScenario {
         schedule.add_systems(
             (
                 systems::facing_system,
-                systems::weapon_cooldown_system,
-                tactical_combat_system,
+                weapons::inventory_cooldown_system,
+                weapons::weapon_switch_system,
+                weapons::inventory_combat_system,
                 update_enemy_memory_system,
             )
                 .chain()
@@ -193,13 +232,20 @@ impl Scenario for TacticalDeathmatchScenario {
         let hp = health.map(|h| h.current).unwrap_or(0.0);
         let max_hp = health.map(|h| h.max).unwrap_or(1.0);
         let weapon = world.get::<Weapon>(agent);
-        let cooldown_norm = weapon
-            .map(|w| {
-                if w.fire_rate > 0.0 {
-                    w.cooldown_remaining / w.fire_rate
-                } else {
-                    0.0
-                }
+        let inv = world.get::<Inventory>(agent);
+
+        // Use Inventory active weapon for cooldown if available, fall back to Weapon
+        let cooldown_norm = inv
+            .and_then(|i| i.active_weapon())
+            .map(|w| w.cooldown_fraction())
+            .or_else(|| {
+                weapon.map(|w| {
+                    if w.fire_rate > 0.0 {
+                        w.cooldown_remaining / w.fire_rate
+                    } else {
+                        0.0
+                    }
+                })
             })
             .unwrap_or(0.0);
 
@@ -214,6 +260,28 @@ impl Scenario for TacticalDeathmatchScenario {
             facing.cos(),
             cooldown_norm,
         ]);
+
+        // Weapon state [8]: per weapon (x2): ammo_fraction, is_reloading, cooldown_fraction = 6
+        //                    + current weapon one-hot (2) = 8
+        if let Some(inventory) = inv {
+            let mut weapon_obs = Vec::with_capacity(8);
+            for slot in &inventory.weapons {
+                weapon_obs.push(slot.ammo_fraction());
+                weapon_obs.push(if slot.is_reloading { 1.0 } else { 0.0 });
+                weapon_obs.push(slot.cooldown_fraction());
+            }
+            // Pad to 6 if fewer than 2 weapons
+            while weapon_obs.len() < 6 {
+                weapon_obs.push(0.0);
+            }
+            // One-hot current weapon
+            for i in 0..2 {
+                weapon_obs.push(if inventory.active == i { 1.0 } else { 0.0 });
+            }
+            writer.write("weapon_state", &weapon_obs);
+        } else {
+            writer.write("weapon_state", &[0.0; 8]);
+        }
 
         // Enemy state [max_agents, 10]
         let registry = world.resource::<AgentRegistry>();
@@ -374,13 +442,17 @@ impl Scenario for TacticalDeathmatchScenario {
             shot_proximity,
         ]);
 
-        // Action mask [14]
+        // Action mask [16]: 12 move + 1 shoot + 1 alive + 2 weapon_select
         let is_dead = world.get::<Dead>(agent).is_some();
-        let can_shoot = weapon.map(|w| w.cooldown_remaining <= 0.0).unwrap_or(false);
+        let can_shoot = inv
+            .and_then(|i| i.active_weapon())
+            .map(|w| w.cooldown_remaining <= 0.0 && w.ammo > 0 && !w.is_reloading)
+            .or_else(|| weapon.map(|w| w.cooldown_remaining <= 0.0))
+            .unwrap_or(false);
         let alive_f = if is_dead { 0.0 } else { 1.0 };
         let shoot_f = if can_shoot && !is_dead { 1.0 } else { 0.0 };
 
-        let mut mask = Vec::with_capacity(14);
+        let mut mask = Vec::with_capacity(16);
         // 12 movement candidate masks
         if let Some(cand_set) = candidate_buffer.get(agent) {
             let wmask = cand_set.walkable_mask();
@@ -393,6 +465,9 @@ impl Scenario for TacticalDeathmatchScenario {
             }
         }
         mask.push(shoot_f);
+        mask.push(alive_f);
+        // 2 weapon_select masks (always valid when alive)
+        mask.push(alive_f);
         mask.push(alive_f);
         writer.write("action_mask", &mask);
     }

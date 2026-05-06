@@ -297,14 +297,15 @@ fn best_compass_with_walls(desired_dir: Vec2, wall_rays: &[f32; 8]) -> f32 {
     best_idx as f32
 }
 
-/// Tactical aggressive AI that outputs the 3-float tactical action format:
-/// `[move_target, aim_delta, shoot]`.
+/// Tactical aggressive AI that outputs the 4-float tactical action format:
+/// `[move_target, aim_delta, shoot, weapon_select]`.
 ///
 /// Behavior:
 /// - **Enemies visible**: advance/retreat/strafe based on distance to nearest enemy,
 ///   aim toward enemy, shoot when in range and weapon ready.
+///   Uses rifle (0.0) when enemy > 200 units, shotgun (1.0) when < 200 units.
 /// - **No enemies visible**: wander using deterministic compass cycling, aim toward
-///   movement direction.
+///   movement direction. Defaults to rifle (0.0).
 /// - **Wall avoidance**: context-steered compass selection using `wall_rays`.
 pub fn tactical_aggressive_ai() -> AiFn {
     Box::new(|ctx: &AiContext| {
@@ -348,7 +349,10 @@ pub fn tactical_aggressive_ai() -> AiFn {
                 0.0
             };
 
-            vec![move_target, aim_delta, shoot]
+            // Weapon select: shotgun (1.0) when close, rifle (0.0) when far
+            let weapon_select = if dist < 200.0 { 1.0 } else { 0.0 };
+
+            vec![move_target, aim_delta, shoot, weapon_select]
         } else {
             // No enemies visible -- wander deterministically
             let epoch = ctx.tick / 128;
@@ -363,7 +367,8 @@ pub fn tactical_aggressive_ai() -> AiFn {
             let desired_angle = move_dir.y.atan2(move_dir.x);
             let aim_delta = angle_to_turn_delta(ctx.my_facing, desired_angle);
 
-            vec![move_target, aim_delta, 0.0]
+            // Default to rifle when no enemies
+            vec![move_target, aim_delta, 0.0, 0.0]
         }
     })
 }
@@ -428,14 +433,14 @@ mod tests {
     // tactical_aggressive_ai output format
     // -------------------------------------------------------------------
     #[test]
-    fn tactical_ai_returns_3_element_vec() {
+    fn tactical_ai_returns_4_element_vec() {
         let ai = tactical_aggressive_ai();
         let ctx = default_context();
         let actions = ai(&ctx);
         assert_eq!(
             actions.len(),
-            3,
-            "tactical AI must return exactly 3 values, got {}",
+            4,
+            "tactical AI must return exactly 4 values, got {}",
             actions.len()
         );
     }
