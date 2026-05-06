@@ -12,7 +12,7 @@ export function drawEntities(
   arenaW: number, arenaH: number,
   entities: EntityState[],
   effects: EffectsState,
-  opts: { glow: boolean; trails: boolean },
+  opts: { glow: boolean; trails: boolean; weather: boolean },
   followId: number | null,
 ) {
   const s = scale(cam, canvas, arenaW);
@@ -172,6 +172,39 @@ export function drawEntities(
       ctx.textAlign = 'center';
       ctx.fillText(shortId(e.id), cx, lY);
       ctx.textAlign = 'start';
+    }
+
+    // Wet-ground reflection
+    if (opts.weather) {
+      const refY = cy + rad + 1;
+      const now = performance.now() / 1000;
+      const waveOff = Math.sin(now * 2.5 + e.id * 1.3) * 0.6;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(cx - rad * 1.5, refY, rad * 3, rad * 1.8);
+      ctx.clip();
+
+      ctx.translate(cx + waveOff, refY);
+      ctx.scale(1, 0.6);
+
+      const fadeGrad = ctx.createLinearGradient(0, 0, 0, rad * 1.5);
+      fadeGrad.addColorStop(0, col + '30');
+      fadeGrad.addColorStop(0.6, col + '10');
+      fadeGrad.addColorStop(1, col + '00');
+
+      ctx.globalAlpha = 0.18;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 3) * i - Math.PI / 6;
+        const px = rad * Math.cos(a);
+        const py = rad * Math.sin(a);
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fillStyle = fadeGrad;
+      ctx.fill();
+      ctx.restore();
     }
   }
 }

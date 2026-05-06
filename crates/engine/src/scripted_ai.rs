@@ -31,6 +31,17 @@ pub struct TargetInfo {
 
 pub type AiFn = Box<dyn Fn(&AiContext) -> ActionDict + Send + Sync>;
 
+fn angle_to_turn_delta(current_facing: f32, desired_angle: f32) -> f32 {
+    let mut diff = desired_angle - current_facing;
+    if diff > std::f32::consts::PI {
+        diff -= 2.0 * std::f32::consts::PI;
+    }
+    if diff < -std::f32::consts::PI {
+        diff += 2.0 * std::f32::consts::PI;
+    }
+    (diff / std::f32::consts::PI).clamp(-1.0, 1.0)
+}
+
 #[derive(Component)]
 pub struct ScriptedAi(pub AiFn);
 
@@ -186,7 +197,8 @@ pub fn aggressive_ai() -> AiFn {
                 0.0
             };
 
-            vec![move_dir.x, move_dir.y, angle, shoot]
+            let turn_delta = angle_to_turn_delta(ctx.my_facing, angle);
+            vec![move_dir.x, move_dir.y, turn_delta, shoot]
         } else {
             let epoch = ctx.tick / 128;
             let hash = (epoch.wrapping_mul(2654435761) ^ ctx.entity_bits) as f32;
@@ -211,8 +223,9 @@ pub fn aggressive_ai() -> AiFn {
                 }
             }
 
-            let angle = best_dir.y.atan2(best_dir.x);
-            vec![best_dir.x, best_dir.y, angle, 0.0]
+            let desired_angle = best_dir.y.atan2(best_dir.x);
+            let turn_delta = angle_to_turn_delta(ctx.my_facing, desired_angle);
+            vec![best_dir.x, best_dir.y, turn_delta, 0.0]
         }
     })
 }
@@ -230,10 +243,12 @@ pub fn creep_ai(march_direction: f32) -> AiFn {
         if let Some(enemy) = nearest_in_range {
             let to_enemy = (enemy.position - ctx.my_position).normalize_or_zero();
             let angle = to_enemy.y.atan2(to_enemy.x);
+            let turn_delta = angle_to_turn_delta(ctx.my_facing, angle);
             let shoot = if ctx.weapon_cooldown <= 0.0 { 1.0 } else { 0.0 };
-            vec![0.0, 0.0, angle, shoot]
+            vec![0.0, 0.0, turn_delta, shoot]
         } else {
-            vec![march_dir.x, march_dir.y, march_direction, 0.0]
+            let turn_delta = angle_to_turn_delta(ctx.my_facing, march_direction);
+            vec![march_dir.x, march_dir.y, turn_delta, 0.0]
         }
     })
 }
@@ -242,8 +257,9 @@ pub fn passive_ai() -> AiFn {
     Box::new(|ctx: &AiContext| {
         let wander_phase = (ctx.tick as f32 * 0.005) + (ctx.entity_bits as f32);
         let dir = Vec2::new(wander_phase.cos(), wander_phase.sin());
-        let angle = dir.y.atan2(dir.x);
-        vec![dir.x, dir.y, angle, 0.0]
+        let desired = dir.y.atan2(dir.x);
+        let turn_delta = angle_to_turn_delta(ctx.my_facing, desired);
+        vec![dir.x, dir.y, turn_delta, 0.0]
     })
 }
 

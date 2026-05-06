@@ -7,6 +7,7 @@ use tracing::{info, warn};
 use ghostlobby_engine::config::GameConfig;
 use ghostlobby_engine::scenarios::moba_lane::MobaLaneScenario;
 use ghostlobby_engine::scenarios::racing::RacingScenario;
+use ghostlobby_engine::scenarios::tactical_deathmatch::TacticalDeathmatchScenario;
 use ghostlobby_engine::tick::{TickMode, TickRunner};
 use ghostlobby_telemetry::ws_sink::WsSink;
 use ghostlobby_telemetry::TelemetrySink;
@@ -113,7 +114,18 @@ pub async fn run_tick_loop(
 }
 
 fn build_runner(config: &GameConfig) -> TickRunner {
-    if config.title.contains("race") || config.title.contains("racing") {
+    let scenario_hint = config
+        .extra
+        .get("scenario")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if scenario_hint == "tactical" || config.title.contains("tactical") {
+        info!("using tactical deathmatch scenario");
+        TickRunner::builder(config.clone())
+            .with_scenario(TacticalDeathmatchScenario)
+            .build()
+    } else if config.title.contains("race") || config.title.contains("racing") {
         info!("using racing scenario");
         TickRunner::builder(config.clone())
             .with_scenario(RacingScenario)

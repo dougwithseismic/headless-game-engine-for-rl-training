@@ -1,5 +1,6 @@
 use bevy_ecs::prelude::*;
 use glam::Vec2;
+use rand::Rng;
 
 use crate::action_space::{ActionMaskBuffer, ActionSpaceDef, RawActionBuffer};
 use crate::ecs::components::*;
@@ -77,17 +78,10 @@ pub fn facing_system(
             && raw.len() >= action_space.total_size
             && action_space.heads.len() > 1
         {
-            let look_slice = action_space.extract_head(raw, 1);
-            if !look_slice.is_empty() {
-                let desired = look_slice[0];
-                let mut diff = desired - facing.0;
-                if diff > std::f32::consts::PI {
-                    diff -= 2.0 * std::f32::consts::PI;
-                }
-                if diff < -std::f32::consts::PI {
-                    diff += 2.0 * std::f32::consts::PI;
-                }
-                facing.0 += diff.clamp(-max_turn, max_turn);
+            let turn_slice = action_space.extract_head(raw, 1);
+            if !turn_slice.is_empty() {
+                let delta = turn_slice[0].clamp(-1.0, 1.0);
+                facing.0 += delta * max_turn;
                 if facing.0 > std::f32::consts::PI {
                     facing.0 -= 2.0 * std::f32::consts::PI;
                 }
@@ -252,7 +246,7 @@ pub fn death_system(
     }
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn respawn_system(
     mut commands: Commands,
     all_agents: Query<
@@ -266,7 +260,21 @@ pub fn respawn_system(
     mut round: ResMut<RoundState>,
     mut physics: ResMut<PhysicsState>,
     mut telemetry: ResMut<TelemetryBuffer>,
+    mut rewards: ResMut<RewardBuffer>,
+    spawn_pool: Res<SpawnPointPool>,
+    obstacle_layout: Res<ObstacleLayout>,
 ) {
+    // Tick the round clock and check for timeout
+    if round.reset_timer.is_none() {
+        round.round_clock += tick.delta;
+        if round.round_clock >= config.0.spawning.round_time_limit {
+            round.reset_timer = Some(0.0);
+            for (entity, _team, _health, _ph, _dead) in &all_agents {
+                rewards.add(entity, -0.5);
+            }
+        }
+    }
+
     // Check if any team has been fully wiped to trigger the round reset timer
     if round.reset_timer.is_none() {
         let team_count = config.0.teams.count;
@@ -289,28 +297,17 @@ pub fn respawn_system(
             return;
         }
 
-        let players_per_team = config.0.teams.players_per_team as usize;
-        let spacing = bounds.height / (players_per_team as f32 + 1.0);
-
-        let mut team_counters: [usize; 4] = [0; 4];
+        let mut rng = rand::rng();
+        let pool = &spawn_pool.0;
 
         for (entity, team, health, ph, _dead) in &all_agents {
-            let ti = team.0 as usize;
-            let player_idx = team_counters[ti];
-            team_counters[ti] += 1;
-
-            let spawn_x = if team.0 == 0 {
-                100.0
-            } else {
-                bounds.width - 100.0
-            };
-            let spawn_y = spacing * (player_idx as f32 + 1.0);
-            let new_pos = Vec2::new(spawn_x, spawn_y);
-            let new_facing = if team.0 == 0 {
-                0.0
-            } else {
-                std::f32::consts::PI
-            };
+            let base = pool[rng.random_range(0..pool.len())];
+            let jitter = Vec2::new(rng.random_range(-15.0f32..15.0), rng.random_range(-15.0f32..15.0));
+            let new_pos = (base + jitter).clamp(
+                Vec2::new(60.0, 60.0),
+                Vec2::new(bounds.width - 60.0, bounds.height - 60.0),
+            );
+            let new_facing = rng.random_range(-std::f32::consts::PI..std::f32::consts::PI);
 
             physics.set_body_position(ph.body, new_pos);
             physics.set_body_linvel(ph.body, Vec2::ZERO);
@@ -336,7 +333,14 @@ pub fn respawn_system(
             });
         }
 
+        telemetry.push(TelemetryEvent::RoundStart {
+            tick: tick.tick,
+            obstacles: obstacle_layout.0.clone(),
+            spawn_points: spawn_pool.0.clone(),
+        });
+
         round.reset_timer = None;
+        round.round_clock = 0.0;
     }
 }
 

@@ -125,6 +125,21 @@ impl PhysicsState {
             .cast_ray(&self.rigid_body_set, &self.collider_set, &ray, max_toi, true, filter)
     }
 
+    pub fn has_line_of_sight(
+        &self,
+        from: Vec2,
+        to: Vec2,
+        exclude: Option<ColliderHandle>,
+    ) -> bool {
+        let delta = to - from;
+        let dist = delta.length();
+        if dist < 0.1 {
+            return true;
+        }
+        let dir = delta / dist;
+        self.cast_ray(from, dir, dist, exclude).is_none()
+    }
+
     pub fn body_position(&self, handle: RigidBodyHandle) -> Option<Vec2> {
         self.rigid_body_set
             .get(handle)

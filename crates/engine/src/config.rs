@@ -56,6 +56,12 @@ pub struct WeaponConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpawningConfig {
     pub respawn_delay: f32,
+    #[serde(default = "default_round_time_limit")]
+    pub round_time_limit: f32,
+}
+
+fn default_round_time_limit() -> f32 {
+    15.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,5 +91,28 @@ impl GameConfig {
         let contents =
             std::fs::read_to_string(path).map_err(|e| EngineError::ConfigLoad(e.to_string()))?;
         contents.parse()
+    }
+
+    pub fn extra_f32(&self, key: &str, default: f32) -> f32 {
+        self.extra
+            .get(key)
+            .and_then(|v| v.as_f64())
+            .map(|v| v as f32)
+            .unwrap_or(default)
+    }
+
+    pub fn extra_str<'a>(&'a self, key: &str, default: &'a str) -> &'a str {
+        self.extra
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or(default)
+    }
+
+    pub fn extra_usize(&self, key: &str, default: usize) -> usize {
+        self.extra
+            .get(key)
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(default)
     }
 }

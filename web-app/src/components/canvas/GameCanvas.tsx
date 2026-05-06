@@ -18,10 +18,9 @@ import { useCameraStore } from '../../stores/camera-store';
 interface GameCanvasProps {
   arenaW: number;
   arenaH: number;
-  obstacles: Array<{ x: number; y: number; width: number; height: number }>;
 }
 
-export function GameCanvas({ arenaW, arenaH, obstacles }: GameCanvasProps) {
+export function GameCanvas({ arenaW, arenaH }: GameCanvasProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fogCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -37,7 +36,7 @@ export function GameCanvas({ arenaW, arenaH, obstacles }: GameCanvasProps) {
   useCanvasResize(wrapRef, canvasRef, fogCanvasRef, arenaW, arenaH);
   useCameraControls(canvasRef, effectsRef, arenaW, arenaH);
   useWebSocket(effectsRef);
-  useCanvasRenderer(canvasRef, fogCanvasRef, mmCanvasRef, effectsRef, arenaW, arenaH, obstacles);
+  useCanvasRenderer(canvasRef, fogCanvasRef, mmCanvasRef, effectsRef, arenaW, arenaH);
 
   return (
     <div className="canvas-wrap" ref={wrapRef}>

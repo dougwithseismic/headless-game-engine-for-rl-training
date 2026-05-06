@@ -2,6 +2,13 @@ import { create } from 'zustand';
 import type { EntityState } from '../types/telemetry';
 import { TEAM_COLORS, shortId } from '../constants';
 
+export interface Obstacle {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 export interface KillEntry {
   tick: number;
   killerId: number;
@@ -20,12 +27,16 @@ interface GameState {
   eventLog: string[];
   tps: number;
   connected: boolean;
+  obstacles: Obstacle[];
+  spawnPoints: [number, number][];
 
   processWorldSnapshot: (tick: number, entities: EntityState[]) => void;
   processKill: (tick: number, killerId: number, victimId: number) => void;
   addLogEntry: (entry: string) => void;
   updateTps: (tps: number) => void;
   setConnected: (connected: boolean) => void;
+  setObstacles: (obstacles: Obstacle[]) => void;
+  setSpawnPoints: (spawnPoints: [number, number][]) => void;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -37,6 +48,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   eventLog: [],
   tps: 0,
   connected: false,
+  obstacles: [],
+  spawnPoints: [],
 
   processWorldSnapshot: (tick, entities) => {
     const entityIdMap: Record<number, EntityState> = {};
@@ -73,4 +86,6 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   updateTps: (tps) => set({ tps }),
   setConnected: (connected) => set({ connected }),
+  setObstacles: (obstacles) => set({ obstacles }),
+  setSpawnPoints: (spawnPoints) => set({ spawnPoints }),
 }));

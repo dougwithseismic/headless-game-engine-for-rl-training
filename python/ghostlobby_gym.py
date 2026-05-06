@@ -1,3 +1,5 @@
+import random
+
 import gymnasium as gym
 import numpy as np
 import ghostlobby
@@ -43,6 +45,7 @@ class GhostLobbyGym(gym.Env):
         self.current_step = 0
         self.episode_reward = 0.0
         self.episode_ticks = 0
+        self.agent_id = random.randint(0, 1)
         self.env = ghostlobby.GhostLobbyEnv(self.config_path, scenario=self.scenario)
         obs, info = self.env.reset()
         return self._flatten_obs(obs[self.agent_id]), {}

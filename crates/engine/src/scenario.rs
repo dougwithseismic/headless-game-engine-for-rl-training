@@ -1,6 +1,8 @@
 use bevy_ecs::prelude::*;
 use glam::Vec2;
 
+use rand::Rng;
+
 use crate::action_space::{ActionHead, ActionSpaceDef};
 use crate::config::GameConfig;
 use crate::ecs::components::*;
@@ -9,6 +11,7 @@ use crate::ecs::systems;
 use crate::observation::{ObsFeature, ObsWriter, ObservationSpaceDef, ShotEventBuffer};
 use crate::physics::PhysicsState;
 use crate::scripted_ai::{aggressive_ai, ScriptedAi};
+use crate::telemetry::TelemetryEvent;
 use crate::tick::EnginePhase;
 
 pub trait Scenario: Send + Sync {
@@ -42,10 +45,10 @@ impl Scenario for DeathmatchScenario {
                 high: vec![1.0, 1.0],
             },
             ActionHead::Continuous {
-                name: "look_angle".into(),
+                name: "turn".into(),
                 size: 1,
-                low: vec![-std::f32::consts::PI],
-                high: vec![std::f32::consts::PI],
+                low: vec![-1.0],
+                high: vec![1.0],
             },
             ActionHead::Discrete {
                 name: "shoot".into(),
@@ -105,7 +108,7 @@ impl Scenario for DeathmatchScenario {
         let config = world.resource::<GameConfigResource>();
         let physics = world.resource::<PhysicsState>();
         let max_speed = config.0.movement.max_speed;
-        let arena_diag = (bounds.width * bounds.width + bounds.height * bounds.height).sqrt();
+        let arena_diag = bounds.diagonal();
 
         let pos = world.get::<Position>(agent).map(|p| p.0).unwrap_or_default();
         let vel = world.get::<Velocity>(agent).map(|v| v.0).unwrap_or_default();
@@ -214,7 +217,7 @@ impl Scenario for DeathmatchScenario {
             hp / max_hp,
             facing.sin(),
             facing.cos(),
-            team as f32,
+            if team == 0 { -1.0 } else { 1.0 },
             cooldown_norm,
             nearest_dist_norm,
             nearest_bearing / std::f32::consts::PI,
@@ -286,7 +289,7 @@ impl Scenario for DeathmatchScenario {
         let mut shaping = 0.0;
 
         if nearest_dist < f32::MAX {
-            let arena_diag = (bounds.width * bounds.width + bounds.height * bounds.height).sqrt();
+            let arena_diag = bounds.diagonal();
             shaping += 0.003 * (1.0 - nearest_dist / arena_diag);
 
             let face_dir = glam::Vec2::new(facing.cos(), facing.sin());
@@ -306,6 +309,7 @@ impl Scenario for DeathmatchScenario {
         .map(|d| d / wall_margin)
         .sum::<f32>();
         shaping -= 0.001 * wall_penalty;
+        shaping -= 0.0005;
 
         combat_reward + shaping
     }
@@ -346,39 +350,66 @@ pub fn setup_world(world: &mut World, config: &GameConfig, physics: &mut Physics
         world.spawn((Position(pos), Obstacle, PhysicsHandle { body, collider }));
     }
 
+    let mut rng = rand::rng();
+    let mut obstacle_rects = Vec::new();
     for obs in &config.obstacles {
-        let center = Vec2::new(obs.x + obs.width / 2.0, obs.y + obs.height / 2.0);
-        let half_extents = Vec2::new(obs.width / 2.0, obs.height / 2.0);
-        let (body, collider) = physics.add_static_body(center, half_extents);
+        let (obs_w, obs_h) = if rng.random_bool(0.5) {
+            (obs.height, obs.width)
+        } else {
+            (obs.width, obs.height)
+        };
+        let jitter_x = rng.random_range(-40.0f32..40.0);
+        let jitter_y = rng.random_range(-40.0f32..40.0);
+        let cx = (obs.x + obs_w / 2.0 + jitter_x).clamp(obs_w, w - obs_w);
+        let cy = (obs.y + obs_h / 2.0 + jitter_y).clamp(obs_h, h - obs_h);
+        let half_extents = Vec2::new(obs_w / 2.0, obs_h / 2.0);
+        let (body, collider) = physics.add_static_body(Vec2::new(cx, cy), half_extents);
         world.spawn((
-            Position(center),
+            Position(Vec2::new(cx, cy)),
             Obstacle,
             PhysicsHandle { body, collider },
         ));
+        obstacle_rects.push(ObstacleRect {
+            x: cx - obs_w / 2.0,
+            y: cy - obs_h / 2.0,
+            width: obs_w,
+            height: obs_h,
+        });
     }
+    world.insert_resource(ObstacleLayout(obstacle_rects.clone()));
+
+    let margin = 60.0;
+    let spawn_points = vec![
+        Vec2::new(margin + 40.0, h / 2.0),
+        Vec2::new(w - margin - 40.0, h / 2.0),
+        Vec2::new(w / 2.0, margin + 40.0),
+        Vec2::new(w / 2.0, h - margin - 40.0),
+        Vec2::new(margin + 80.0, margin + 80.0),
+        Vec2::new(w - margin - 80.0, margin + 80.0),
+        Vec2::new(margin + 80.0, h - margin - 80.0),
+        Vec2::new(w - margin - 80.0, h - margin - 80.0),
+    ];
+    world.insert_resource(SpawnPointPool(spawn_points.clone()));
+
+    world.resource_mut::<TelemetryBuffer>().push(TelemetryEvent::RoundStart {
+        tick: 0,
+        obstacles: obstacle_rects,
+        spawn_points: spawn_points.clone(),
+    });
 
     let mut source_id: u32 = 0;
     for team_idx in 0..config.teams.count {
-        for player_idx in 0..config.teams.players_per_team {
-            let spawn_x = if team_idx == 0 {
-                100.0
-            } else {
-                config.arena.width - 100.0
-            };
-            let spacing = config.arena.height / (config.teams.players_per_team as f32 + 1.0);
-            let spawn_y = spacing * (player_idx as f32 + 1.0);
-            let spawn_pos = Vec2::new(spawn_x, spawn_y);
+        for _player_idx in 0..config.teams.players_per_team {
+            let spawn_pos = spawn_points[rng.random_range(0..spawn_points.len())]
+                + Vec2::new(rng.random_range(-15.0f32..15.0), rng.random_range(-15.0f32..15.0));
 
             let (body, collider) = physics.add_dynamic_body(spawn_pos, 15.0);
 
+            let random_facing = rng.random_range(-std::f32::consts::PI..std::f32::consts::PI);
             world.spawn((
                 Position(spawn_pos),
                 Velocity(Vec2::ZERO),
-                Facing(if team_idx == 0 {
-                    0.0
-                } else {
-                    std::f32::consts::PI
-                }),
+                Facing(random_facing),
                 Health {
                     current: 100.0,
                     max: 100.0,

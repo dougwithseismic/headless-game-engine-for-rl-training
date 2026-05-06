@@ -38,18 +38,36 @@ export function useWebSocket(effectsRef: MutableRefObject<EffectsState>) {
     }, 1000);
 
     function connect() {
-      ws = new WebSocket(`ws://${location.host}/ws/observe`);
+      const wsHost = location.port === '5174' ? `${location.hostname}:3000` : location.host;
+      ws = new WebSocket(`ws://${wsHost}/ws/observe`);
 
       ws.onopen = () => {
         useGameStore.getState().setConnected(true);
         useGameStore.getState().addLogEntry(
           '<span class="timestamp">[000000]</span> <span class="event-type">SYS  </span> connected to /ws/observe'
         );
+
+        // Fallback: fetch obstacles from REST if no RoundStart arrives within 2s
+        const fallbackTimer = setTimeout(() => {
+          if (useGameStore.getState().obstacles.length === 0) {
+            fetch('/api/obstacles')
+              .then(r => r.json())
+              .then((data: { obstacles: Array<{ x: number; y: number; width: number; height: number }>; spawn_points: Array<[number, number]> }) => {
+                const store = useGameStore.getState();
+                if (store.obstacles.length === 0) {
+                  store.setObstacles(data.obstacles ?? []);
+                  store.setSpawnPoints(data.spawn_points ?? []);
+                }
+              })
+              .catch(() => { /* ignore fallback errors */ });
+          }
+        }, 2000);
+        ws.addEventListener('close', () => clearTimeout(fallbackTimer), { once: true });
       };
 
       ws.onclose = () => {
         useGameStore.getState().setConnected(false);
-        setTimeout(connect, 2000);
+        setTimeout(connect, 500);
       };
 
       ws.onerror = () => {
@@ -115,6 +133,17 @@ export function useWebSocket(effectsRef: MutableRefObject<EffectsState>) {
               if (d.position) {
                 spawnParticles(effects, d.position[0], d.position[1], '#4ade80', 10, 'spawn');
               }
+              break;
+            }
+
+            case 'RoundStart': {
+              const store = useGameStore.getState();
+              store.setObstacles(d.obstacles ?? []);
+              store.setSpawnPoints(d.spawn_points ?? []);
+              const ts = String(d.tick).padStart(6, '0');
+              store.addLogEntry(
+                `<span class="timestamp">[${ts}]</span> <span class="event-type event-spawn">ROUND</span> new round started (${d.obstacles?.length ?? 0} obstacles)`
+              );
               break;
             }
           }

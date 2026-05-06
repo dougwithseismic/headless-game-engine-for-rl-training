@@ -15,7 +15,6 @@ export function useCanvasRenderer(
   effectsRef: MutableRefObject<EffectsState>,
   arenaW: number,
   arenaH: number,
-  obstacles: Array<{ x: number; y: number; width: number; height: number }>,
 ) {
   const fpsRef = useRef({ count: 0, lastTime: performance.now(), value: 0 });
   const fpsElRef = useRef<HTMLElement | null>(null);
@@ -35,7 +34,7 @@ export function useCanvasRenderer(
       const mmCanvas = mmCanvasRef.current;
       const mmCtx = mmCanvas?.getContext('2d') ?? null;
 
-      const { entities } = useGameStore.getState();
+      const { entities, obstacles } = useGameStore.getState();
       const camera = useCameraStore.getState();
       const opts = useRenderStore.getState();
 
@@ -74,7 +73,7 @@ export function useCanvasRenderer(
         entities,
         effects: effectsRef.current,
         obstacles,
-        opts: { fog: opts.fog, glow: opts.glow, grid: opts.grid, trails: opts.trails },
+        opts: { fog: opts.fog, glow: opts.glow, grid: opts.grid, trails: opts.trails, weather: opts.weather },
         followId: cam.followId,
       });
 
@@ -94,5 +93,5 @@ export function useCanvasRenderer(
 
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, [canvasRef, fogCanvasRef, mmCanvasRef, effectsRef, arenaW, arenaH, obstacles]);
+  }, [canvasRef, fogCanvasRef, mmCanvasRef, effectsRef, arenaW, arenaH]);
 }

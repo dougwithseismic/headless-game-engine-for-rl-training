@@ -1,0 +1,47 @@
+{
+  "title": "dust2-1v1",
+  "tick_rate": 64,
+  "arena": { "width": 1200, "height": 1200 },
+  "movement": { "max_speed": 200, "acceleration": 1000, "friction": 800, "turn_rate": 12.0 },
+  "combat": { "default_weapon": { "damage": 34, "fire_rate": 0.3, "range": 500 } },
+  "spawning": { "respawn_delay": 0.5, "round_time_limit": 25.0 },
+  "teams": { "count": 2, "players_per_team": 1 },
+  "obstacles": [
+    { "x": 0,    "y": 480,  "width": 360, "height": 20 },
+    { "x": 0,    "y": 700,  "width": 360, "height": 20 },
+
+    { "x": 840,  "y": 480,  "width": 360, "height": 20 },
+    { "x": 840,  "y": 700,  "width": 360, "height": 20 },
+
+    { "x": 360,  "y": 480,  "width": 20,  "height": 100 },
+    { "x": 820,  "y": 480,  "width": 20,  "height": 100 },
+
+    { "x": 360,  "y": 620,  "width": 20,  "height": 100 },
+    { "x": 820,  "y": 620,  "width": 20,  "height": 100 },
+
+    { "x": 540,  "y": 520,  "width": 120, "height": 20 },
+    { "x": 540,  "y": 660,  "width": 120, "height": 20 },
+
+    { "x": 560,  "y": 540,  "width": 20,  "height": 120 },
+
+    { "x": 180,  "y": 240,  "width": 80,  "height": 20 },
+    { "x": 180,  "y": 340,  "width": 80,  "height": 20 },
+    { "x": 160,  "y": 240,  "width": 20,  "height": 120 },
+
+    { "x": 940,  "y": 860,  "width": 80,  "height": 20 },
+    { "x": 940,  "y": 960,  "width": 80,  "height": 20 },
+    { "x": 1020, "y": 860,  "width": 20,  "height": 120 },
+
+    { "x": 480,  "y": 120,  "width": 20,  "height": 200 },
+    { "x": 700,  "y": 120,  "width": 20,  "height": 200 },
+
+    { "x": 480,  "y": 880,  "width": 20,  "height": 200 },
+    { "x": 700,  "y": 880,  "width": 20,  "height": 200 },
+
+    { "x": 200,  "y": 880,  "width": 60,  "height": 60 },
+    { "x": 940,  "y": 260,  "width": 60,  "height": 60 },
+
+    { "x": 400,  "y": 400,  "width": 40,  "height": 40 },
+    { "x": 760,  "y": 760,  "width": 40,  "height": 40 }
+  ]
+}

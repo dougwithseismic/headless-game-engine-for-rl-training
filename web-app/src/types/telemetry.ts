@@ -17,4 +17,5 @@ export type TelemetryEvent =
   | { type: 'Damage'; tick: number; source: number; target: number; amount: number }
   | { type: 'ShotFired'; tick: number; shooter: number; origin: Vec2; direction: Vec2; hit_target: number | null }
   | { type: 'Spawn'; tick: number; entity: number; position: Vec2; team: number }
-  | { type: 'TickComplete'; tick: number; entity_count: number };
+  | { type: 'TickComplete'; tick: number; entity_count: number }
+  | { type: 'RoundStart'; tick: number; obstacles: Array<{ x: number; y: number; width: number; height: number }>; spawn_points: Vec2[] };

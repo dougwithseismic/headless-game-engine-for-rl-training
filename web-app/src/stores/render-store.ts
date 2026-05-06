@@ -5,7 +5,8 @@ interface RenderState {
   glow: boolean;
   grid: boolean;
   trails: boolean;
-  toggle: (key: 'fog' | 'glow' | 'grid' | 'trails') => void;
+  weather: boolean;
+  toggle: (key: 'fog' | 'glow' | 'grid' | 'trails' | 'weather') => void;
 }
 
 export const useRenderStore = create<RenderState>((set) => ({
@@ -13,5 +14,6 @@ export const useRenderStore = create<RenderState>((set) => ({
   glow: true,
   grid: false,
   trails: true,
+  weather: true,
   toggle: (key) => set((s) => ({ [key]: !s[key] })),
 }));

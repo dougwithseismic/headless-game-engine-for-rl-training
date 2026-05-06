@@ -51,6 +51,10 @@ def parse_args():
     p.add_argument("--resume", default=None, help="Path to model .zip to resume from")
     p.add_argument("--resume-norm", default=None, help="Path to vec_normalize.pkl to resume normalization stats")
     p.add_argument("--no-normalize", action="store_true", help="Disable VecNormalize (use with pre-normalized obs)")
+    p.add_argument("--live-view", action="store_true", help="Stream telemetry from env 0 to WebSocket on port 3000")
+    p.add_argument("--live-port", type=int, default=3000, help="Port for live view WebSocket server")
+    p.add_argument("--live-snapshot-freq", type=int, default=30_000, help="Steps between live view model snapshots")
+    p.add_argument("--recurrent", action="store_true", help="Use RecurrentPPO (LSTM) instead of PPO")
     return p.parse_args()
 
 
@@ -71,7 +75,7 @@ def make_env(config_path, scenario, frame_skip, max_steps):
 
 
 class SelfPlayCallback(BaseCallback):
-    def __init__(self, swap_interval, scripted_warmup, train_env, verbose=1):
+    def __init__(self, swap_interval, scripted_warmup, train_env, max_history=20, verbose=1):
         super().__init__(verbose)
         self.swap_interval = swap_interval
         self.scripted_warmup = scripted_warmup
@@ -79,6 +83,7 @@ class SelfPlayCallback(BaseCallback):
         self.last_swap = 0
         self.swap_count = 0
         self.opponent_history = []
+        self.max_history = max_history
 
     def _on_step(self):
         steps = self.num_timesteps
@@ -94,8 +99,14 @@ class SelfPlayCallback(BaseCallback):
 
     def _swap_opponent(self):
         self.swap_count += 1
-        opponent = copy.deepcopy(self.model.policy)
-        opponent.set_training_mode(False)
+        snapshot = copy.deepcopy(self.model.policy)
+        snapshot.set_training_mode(False)
+        self.opponent_history.append(snapshot)
+        if len(self.opponent_history) > self.max_history:
+            self.opponent_history.pop(0)
+
+        import random
+        opponent = random.choice(self.opponent_history)
 
         vec_norm = self.train_env
         inner_vec = vec_norm.venv if hasattr(vec_norm, 'venv') else vec_norm
@@ -107,35 +118,56 @@ class SelfPlayCallback(BaseCallback):
 
         if self.verbose:
             print(f"\n  [self-play] Swap #{self.swap_count} at step {self.num_timesteps:,}"
-                  f" — opponent updated to current policy\n")
+                  f" — sampled opponent from pool of {len(self.opponent_history)}\n")
 
 
 class _NormalizedOpponent:
-    """Wraps a frozen policy (optionally with VecNormalize stats) to produce actions."""
+    """Wraps a frozen policy (optionally with VecNormalize stats) to produce actions.
+    Tracks LSTM states for recurrent policies."""
     def __init__(self, policy, env_wrapper):
         self.policy = policy
         self.obs_rms = copy.deepcopy(env_wrapper.obs_rms) if hasattr(env_wrapper, 'obs_rms') else None
         self.clip_obs = getattr(env_wrapper, 'clip_obs', 10.0)
         self.epsilon = getattr(env_wrapper, 'epsilon', 1e-8)
+        self._lstm_states = None
 
-    def predict(self, obs, deterministic=False):
+    def reset_states(self):
+        self._lstm_states = None
+
+    def predict(self, obs, deterministic=False, state=None, episode_start=None):
         import numpy as np
         if self.obs_rms is not None:
             obs = np.clip(
                 (obs - self.obs_rms.mean) / np.sqrt(self.obs_rms.var + self.epsilon),
                 -self.clip_obs, self.clip_obs
             ).astype(np.float32)
-        import torch
-        with torch.no_grad():
-            obs_tensor = torch.as_tensor(obs).unsqueeze(0).to(self.policy.device)
-            dist = self.policy.get_distribution(obs_tensor)
-            action = dist.sample() if not deterministic else dist.mode()
-        return action.cpu().numpy().squeeze(0), None
+        use_state = state if state is not None else self._lstm_states
+        if episode_start is None:
+            episode_start = np.array([use_state is None])
+        action, new_states = self.policy.predict(
+            obs, state=use_state, episode_start=episode_start, deterministic=deterministic,
+        )
+        self._lstm_states = new_states
+        return action, new_states
 
 
 def main():
     args = parse_args()
     config_path = resolve_config(args.config)
+
+    if args.recurrent:
+        from sb3_contrib import RecurrentPPO
+        AlgoClass = RecurrentPPO
+        PolicyName = "MlpLstmPolicy"
+        if args.n_steps == 4096:
+            args.n_steps = 128
+        if args.batch_size == 256:
+            args.batch_size = 128
+        if args.n_epochs == 4:
+            args.n_epochs = 5
+    else:
+        AlgoClass = PPO
+        PolicyName = "MlpPolicy"
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_dir = os.path.join("runs", f"{args.name}_{timestamp}")
@@ -144,6 +176,7 @@ def main():
 
     print(f"Run directory: {run_dir}")
     print(f"Parallel environments: {args.n_envs}")
+    print(f"Algorithm: {'RecurrentPPO (LSTM)' if args.recurrent else 'PPO'}")
     print(f"Self-play swap interval: {args.swap_interval:,} steps")
     print(f"Scripted AI warmup: {args.scripted_warmup:,} steps")
 
@@ -179,9 +212,18 @@ def main():
     print(f"Action space: {probe_env.action_space.shape}")
     del probe_env
 
+    policy_kwargs = {}
+    if args.recurrent:
+        policy_kwargs = {
+            "lstm_hidden_size": 128,
+            "n_lstm_layers": 1,
+            "shared_lstm": False,
+            "enable_critic_lstm": True,
+        }
+
     if args.resume:
         print(f"Resuming model from: {args.resume}")
-        model = PPO.load(
+        model = AlgoClass.load(
             args.resume,
             env=train_env,
             tensorboard_log=os.path.join(run_dir, "tensorboard"),
@@ -189,8 +231,8 @@ def main():
             ent_coef=args.ent_coef,
         )
     else:
-        model = PPO(
-            "MlpPolicy",
+        model = AlgoClass(
+            PolicyName,
             train_env,
             verbose=1,
             tensorboard_log=os.path.join(run_dir, "tensorboard"),
@@ -202,6 +244,7 @@ def main():
             gae_lambda=0.95,
             clip_range=0.2,
             ent_coef=args.ent_coef,
+            **({"policy_kwargs": policy_kwargs} if policy_kwargs else {}),
         )
 
     checkpoint_cb = CheckpointCallback(
@@ -228,7 +271,19 @@ def main():
         verbose=1,
     )
 
-    callbacks = CallbackList([checkpoint_cb, eval_cb, selfplay_cb])
+    all_callbacks = [checkpoint_cb, eval_cb, selfplay_cb]
+
+    if args.live_view:
+        from live_view import LiveSnapshotCallback, start_live_view
+        snapshot_path = os.path.join(run_dir, "live_snapshot")
+        live_cb = LiveSnapshotCallback(snapshot_path, interval=args.live_snapshot_freq)
+        all_callbacks.append(live_cb)
+        start_live_view(
+            config_path, args.scenario, args.frame_skip, args.max_steps,
+            snapshot_path, port=args.live_port,
+        )
+
+    callbacks = CallbackList(all_callbacks)
 
     print(f"\nPhase 1: Scripted AI warmup ({args.scripted_warmup:,} steps)")
     print(f"Phase 2: Self-play with swaps every {args.swap_interval:,} steps")

@@ -1,28 +1,22 @@
-# Rust
+# Build artifacts
 target/
-*.swp
-*.swo
+*.so
+*.dylib
 
 # Python
 __pycache__/
 *.pyc
-*.pyo
-*.egg-info/
-dist/
 .venv/
+*.egg-info/
 
-# Local env files
-.env
-.env.local
-.env.*
-
-# Telemetry output
-*.jsonl
-
-# Training outputs
+# Training artifacts
 runs/
 models/
 
-# Misc
+# OS
 .DS_Store
-*.pem
+
+# Editor
+.idea/
+.vscode/
+*.swp

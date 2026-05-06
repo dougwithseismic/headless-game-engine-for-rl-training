@@ -1,4 +1,5 @@
-import { drawBackground, drawArenaBounds, drawLineGrid, drawDotGrid, drawObstacles } from './draw-arena';
+import { drawBackground, drawArenaBounds, drawLineGrid, drawDotGrid } from './draw-arena';
+import { drawObstacles, drawRain } from './draw-obstacles';
 import { drawEntities } from './draw-entities';
 import { drawDecals, drawAmbient, drawRipples, drawShots, drawParticles, drawDmgNumbers } from './draw-effects';
 import { drawFog } from './draw-fog';
@@ -20,7 +21,7 @@ export interface DrawContext {
   entities: EntityState[];
   effects: EffectsState;
   obstacles: Array<{ x: number; y: number; width: number; height: number }>;
-  opts: { fog: boolean; glow: boolean; grid: boolean; trails: boolean };
+  opts: { fog: boolean; glow: boolean; grid: boolean; trails: boolean; weather: boolean };
   followId: number | null;
 }
 
@@ -37,7 +38,7 @@ export function drawFrame(dc: DrawContext) {
     drawLineGrid(ctx, w, h, cam, canvas, arenaW, arenaH);
   }
 
-  drawObstacles(ctx, w, h, cam, canvas, arenaW, arenaH, obstacles);
+  drawObstacles(ctx, w, h, cam, canvas, arenaW, arenaH, obstacles, opts.weather);
   drawDecals(ctx, w, h, cam, canvas, arenaW, arenaH, effects);
   drawAmbient(ctx, w, h, cam, canvas, arenaW, arenaH, effects);
   drawRipples(ctx, w, h, cam, canvas, arenaW, arenaH, effects);
@@ -45,6 +46,10 @@ export function drawFrame(dc: DrawContext) {
   drawParticles(ctx, w, h, cam, canvas, arenaW, arenaH, effects, opts.glow);
   drawEntities(ctx, w, h, cam, canvas, arenaW, arenaH, entities, effects, opts, followId);
   drawDmgNumbers(ctx, w, h, cam, canvas, arenaW, arenaH, effects);
+
+  if (opts.weather) {
+    drawRain(ctx, w, h, cam);
+  }
 
   if (opts.fog && dc.fogCtx) {
     drawFog(dc.fogCtx, w, h, cam, canvas, arenaW, arenaH, entities);

@@ -1,12 +1,15 @@
 pub mod action_space;
 pub mod builder;
+pub mod candidates;
 pub mod config;
 pub mod ecs;
 pub mod error;
+pub mod navigation;
 pub mod observation;
 pub mod physics;
 pub mod scenario;
 pub mod scenarios;
 pub mod scripted_ai;
+pub mod sensors;
 pub mod telemetry;
 pub mod tick;

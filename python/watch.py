@@ -69,7 +69,7 @@ class ObsNormalizer:
 
 class GameLoop:
     def __init__(self, model, config_path, scenario, config, frame_skip,
-                 deterministic=True, obs_normalizer=None):
+                 deterministic=True, obs_normalizer=None, is_recurrent=False):
         self.model = model
         self.config_path = config_path
         self.scenario = scenario
@@ -77,9 +77,13 @@ class GameLoop:
         self.frame_skip = frame_skip
         self.deterministic = deterministic
         self.obs_normalizer = obs_normalizer
+        self.is_recurrent = is_recurrent
         self.ws_clients = set()
         self.running = False
         self.tick = 0
+        self.latest_round_start = None
+        self.lstm_states = {}
+        self.episode_starts = {}
 
     def make_env(self):
         env = ghostlobby.GhostLobbyEnv(self.config_path, scenario=self.scenario)
@@ -87,6 +91,8 @@ class GameLoop:
         return env, raw_obs
 
     async def broadcast(self, msg):
+        if '"RoundStart"' in msg:
+            self.latest_round_start = msg
         dead = set()
         for ws in self.ws_clients:
             try:
@@ -100,19 +106,37 @@ class GameLoop:
         tick_interval = 1.0 / self.config["tick_rate"]
 
         env, raw_obs = self.make_env()
-        obs = flatten_obs(raw_obs[0])
-        if self.obs_normalizer:
-            obs = self.obs_normalizer.normalize(obs)
+        num_agents = env.num_agents()
+        agent_obs = {}
+        for i in range(num_agents):
+            if i in raw_obs:
+                o = flatten_obs(raw_obs[i])
+                if self.obs_normalizer:
+                    o = self.obs_normalizer.normalize(o)
+                agent_obs[i] = o
+            self.lstm_states[i] = None
+            self.episode_starts[i] = True
         episode_ticks = 0
 
         while self.running:
             t0 = time.perf_counter()
 
-            action, _ = self.model.predict(obs, deterministic=self.deterministic)
-            action_list = action.tolist() if hasattr(action, "tolist") else list(action)
+            actions = {}
+            for i in range(num_agents):
+                if i in agent_obs:
+                    if self.is_recurrent:
+                        action, self.lstm_states[i] = self.model.predict(
+                            agent_obs[i], state=self.lstm_states[i],
+                            episode_start=np.array([self.episode_starts[i]]),
+                            deterministic=self.deterministic,
+                        )
+                        self.episode_starts[i] = False
+                    else:
+                        action, _ = self.model.predict(agent_obs[i], deterministic=self.deterministic)
+                    actions[i] = action.tolist() if hasattr(action, "tolist") else list(action)
 
             for _ in range(self.frame_skip):
-                raw_obs, rewards, terms, truncs, infos = env.step({0: action_list})
+                raw_obs, rewards, terms, truncs, infos = env.step(actions)
 
                 for event_json in env.drain_telemetry():
                     await self.broadcast(event_json)
@@ -125,15 +149,23 @@ class GameLoop:
                 if sleep_time > 0.001:
                     await asyncio.sleep(sleep_time)
 
-            obs = flatten_obs(raw_obs[0])
-            if self.obs_normalizer:
-                obs = self.obs_normalizer.normalize(obs)
+            for i in range(num_agents):
+                if i in raw_obs:
+                    o = flatten_obs(raw_obs[i])
+                    if self.obs_normalizer:
+                        o = self.obs_normalizer.normalize(o)
+                    agent_obs[i] = o
 
-            if terms.get(0, False) or episode_ticks >= 8192:
+            if any(terms.get(i, False) for i in range(num_agents)) or episode_ticks >= 8192:
                 env, raw_obs = self.make_env()
-                obs = flatten_obs(raw_obs[0])
-                if self.obs_normalizer:
-                    obs = self.obs_normalizer.normalize(obs)
+                for i in range(num_agents):
+                    if i in raw_obs:
+                        o = flatten_obs(raw_obs[i])
+                        if self.obs_normalizer:
+                            o = self.obs_normalizer.normalize(o)
+                        agent_obs[i] = o
+                    self.lstm_states[i] = None
+                    self.episode_starts[i] = True
                 episode_ticks = 0
 
 
@@ -141,6 +173,8 @@ async def ws_observe(request):
     ws = web.WebSocketResponse()
     await ws.prepare(request)
     game_loop = request.app["game_loop"]
+    if game_loop.latest_round_start:
+        await ws.send_str(game_loop.latest_round_start)
     game_loop.ws_clients.add(ws)
     try:
         async for _ in ws:
@@ -167,6 +201,18 @@ async def api_match(request):
     })
 
 
+async def api_obstacles(request):
+    gl = request.app["game_loop"]
+    if gl.latest_round_start:
+        import json
+        data = json.loads(gl.latest_round_start)
+        return web.json_response({
+            "obstacles": data.get("obstacles", []),
+            "spawn_points": data.get("spawn_points", []),
+        })
+    return web.json_response({"obstacles": [], "spawn_points": []})
+
+
 async def start_game_loop(app):
     app["game_task"] = asyncio.create_task(app["game_loop"].run())
 
@@ -183,9 +229,9 @@ async def stop_game_loop(app):
 if __name__ == "__main__":
     args = parse_args()
 
-    from stable_baselines3 import PPO
-    model = PPO.load(args.model)
-    print(f"Loaded model: {args.model}")
+    from model_utils import load_model
+    model, is_recurrent = load_model(args.model)
+    print(f"Loaded model: {args.model} ({'RecurrentPPO' if is_recurrent else 'PPO'})")
 
     obs_normalizer = None
     if args.vec_normalize:
@@ -197,7 +243,8 @@ if __name__ == "__main__":
         config = json.load(f)
 
     game_loop = GameLoop(model, config_path, args.scenario, config, args.frame_skip,
-                         deterministic=not args.stochastic, obs_normalizer=obs_normalizer)
+                         deterministic=not args.stochastic, obs_normalizer=obs_normalizer,
+                         is_recurrent=is_recurrent)
 
     app = web.Application()
     app["game_loop"] = game_loop
@@ -205,6 +252,7 @@ if __name__ == "__main__":
     app.router.add_get("/api/health", api_health)
     app.router.add_get("/api/config", api_config)
     app.router.add_get("/api/match", api_match)
+    app.router.add_get("/api/obstacles", api_obstacles)
     app.router.add_get("/ws/observe", ws_observe)
     app.router.add_static("/", os.path.join(PROJECT_ROOT, "web"), show_index=True)
 

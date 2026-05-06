@@ -1,6 +1,8 @@
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
+use crate::ecs::components::ObstacleRect;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityState {
     pub id: u64,
@@ -43,6 +45,11 @@ pub enum TelemetryEvent {
         origin: Vec2,
         direction: Vec2,
         hit_target: Option<u64>,
+    },
+    RoundStart {
+        tick: u64,
+        obstacles: Vec<ObstacleRect>,
+        spawn_points: Vec<Vec2>,
     },
     TickComplete {
         tick: u64,

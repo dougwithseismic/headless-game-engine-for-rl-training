@@ -6,6 +6,8 @@ Agent 1 is controlled by a frozen opponent policy that gets swapped periodically
 Falls back to scripted AI actions when no opponent policy is set.
 """
 
+import random
+
 import gymnasium as gym
 import numpy as np
 import ghostlobby
@@ -23,8 +25,12 @@ class SelfPlayGym(gym.Env):
         self.current_step = 0
         self.episode_reward = 0.0
         self.episode_ticks = 0
+        self.agent_id = 0
+        self.opp_id = 1
         self.opponent_policy = None
         self.opponent_obs = None
+        self.opponent_lstm_states = None
+        self.telemetry_sink = None
 
         self.env = ghostlobby.GhostLobbyEnv(config_path, scenario=scenario)
         space_info = self.env.action_space()
@@ -43,6 +49,7 @@ class SelfPlayGym(gym.Env):
 
     def set_opponent(self, policy):
         self.opponent_policy = policy
+        self.opponent_lstm_states = None
 
     def _flatten_obs(self, agent_obs):
         parts = []
@@ -51,10 +58,14 @@ class SelfPlayGym(gym.Env):
         return np.array(parts, dtype=np.float32)
 
     def _get_opponent_action(self, obs_dict):
-        if self.opponent_policy is None or 1 not in obs_dict:
+        if self.opponent_policy is None or self.opp_id not in obs_dict:
             return None
-        opp_obs = self._flatten_obs(obs_dict[1])
-        action, _ = self.opponent_policy.predict(opp_obs, deterministic=False)
+        opp_obs = self._flatten_obs(obs_dict[self.opp_id])
+        episode_start = np.array([self.opponent_lstm_states is None])
+        action, self.opponent_lstm_states = self.opponent_policy.predict(
+            opp_obs, state=self.opponent_lstm_states,
+            episode_start=episode_start, deterministic=False,
+        )
         return action.tolist() if hasattr(action, "tolist") else list(action)
 
     def reset(self, seed=None, options=None):
@@ -62,10 +73,13 @@ class SelfPlayGym(gym.Env):
         self.current_step = 0
         self.episode_reward = 0.0
         self.episode_ticks = 0
+        self.agent_id = random.randint(0, 1)
+        self.opp_id = 1 - self.agent_id
         self.env = ghostlobby.GhostLobbyEnv(self.config_path, scenario=self.scenario)
         obs, info = self.env.reset()
         self.opponent_obs = obs
-        return self._flatten_obs(obs[0]), {}
+        self.opponent_lstm_states = None
+        return self._flatten_obs(obs[self.agent_id]), {}
 
     def step(self, action):
         action_list = action.tolist() if hasattr(action, "tolist") else list(action)
@@ -76,14 +90,17 @@ class SelfPlayGym(gym.Env):
         opp_action = self._get_opponent_action(self.opponent_obs)
 
         for _ in range(self.frame_skip):
-            actions = {0: action_list}
+            actions = {self.agent_id: action_list}
             if opp_action is not None:
-                actions[1] = opp_action
+                actions[self.opp_id] = opp_action
             obs, rewards, term, trunc, infos = self.env.step(actions)
-            self.env.drain_telemetry()
-            total_reward += rewards.get(0, 0.0)
+            telemetry = self.env.drain_telemetry()
+            if self.telemetry_sink is not None:
+                for event_json in telemetry:
+                    self.telemetry_sink.append(event_json)
+            total_reward += rewards.get(self.agent_id, 0.0)
             self.episode_ticks += 1
-            terminated = term.get(0, False)
+            terminated = term.get(self.agent_id, False)
             if terminated:
                 break
 
@@ -93,7 +110,7 @@ class SelfPlayGym(gym.Env):
         if self.current_step >= self.max_steps:
             truncated = True
 
-        flat_obs = self._flatten_obs(obs[0])
+        flat_obs = self._flatten_obs(obs[self.agent_id])
 
         info = {}
         if terminated or truncated:

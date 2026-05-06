@@ -5,8 +5,9 @@ import sys
 sys.path.insert(0, os.path.dirname(__file__))
 
 import numpy as np
-from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+
+from model_utils import load_model
 
 from ghostlobby_gym import GhostLobbyGym
 
@@ -58,8 +59,8 @@ def main():
         env = make_env()
         use_vec = False
 
-    model = PPO.load(args.model)
-    print(f"Loaded model from {args.model}")
+    model, is_recurrent = load_model(args.model)
+    print(f"Loaded model from {args.model} ({'RecurrentPPO' if is_recurrent else 'PPO'})")
     print(f"Running {args.episodes} episodes...\n")
 
     all_rewards = []
@@ -71,9 +72,19 @@ def main():
         total_reward = 0.0
         steps = 0
         done = False
+        lstm_states = None
+        episode_start = True
 
         while not done:
-            action, _ = model.predict(obs, deterministic=True)
+            if is_recurrent:
+                action, lstm_states = model.predict(
+                    obs, state=lstm_states,
+                    episode_start=np.array([episode_start]),
+                    deterministic=True,
+                )
+                episode_start = False
+            else:
+                action, _ = model.predict(obs, deterministic=True)
             if use_vec:
                 obs, reward, dones, infos = env.step(action)
                 total_reward += reward[0]

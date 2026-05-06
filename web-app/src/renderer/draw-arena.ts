@@ -106,38 +106,3 @@ export function drawDotGrid(
   }
 }
 
-export function drawObstacles(
-  ctx: CanvasRenderingContext2D,
-  w: number, h: number,
-  cam: CameraParams,
-  canvas: { width: number; height: number },
-  arenaW: number, arenaH: number,
-  obstacles: Array<{ x: number; y: number; width: number; height: number }>,
-) {
-  const s = scale(cam, canvas, arenaW);
-  for (const obs of obstacles) {
-    const [ox, oy] = toCanvas(obs.x, obs.y, canvas, arenaW, arenaH, cam);
-    const [ox2, oy2] = toCanvas(obs.x + obs.width, obs.y + obs.height, canvas, arenaW, arenaH, cam);
-    const ow = ox2 - ox, oh = oy2 - oy;
-    if (ox + ow < -10 || ox > w + 10 || oy + oh < -10 || oy > h + 10) continue;
-
-    ctx.fillStyle = '#06060c'; ctx.fillRect(ox + 3, oy + 3, ow, oh);
-    ctx.fillStyle = '#12122a'; ctx.fillRect(ox, oy, ow, oh);
-
-    ctx.save();
-    ctx.globalAlpha = 0.04;
-    ctx.strokeStyle = '#8b5cf6';
-    ctx.lineWidth = 0.5;
-    const hStep = Math.max(6, 8 * s / 0.7);
-    ctx.beginPath();
-    for (let d = -ow; d < ow + oh; d += hStep) {
-      ctx.moveTo(ox + Math.max(0, d), oy + Math.max(0, -d));
-      ctx.lineTo(ox + Math.min(ow, d + oh), oy + Math.min(oh, oh - d));
-    }
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.strokeStyle = '#222244'; ctx.lineWidth = 1; ctx.strokeRect(ox, oy, ow, oh);
-    ctx.strokeStyle = '#2a2a50'; ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox + ow, oy); ctx.stroke();
-  }
-}
