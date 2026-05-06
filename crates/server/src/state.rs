@@ -3,7 +3,7 @@ use tokio::sync::mpsc;
 use ghostlobby_engine::config::GameConfig;
 use ghostlobby_telemetry::ws_sink::WsSink;
 
-use crate::api::MatchResponse;
+use crate::api::{MatchResponse, ObstaclesResponse};
 
 pub enum EngineCommand {
     InjectRawAction {
@@ -12,6 +12,9 @@ pub enum EngineCommand {
     },
     GetStatus {
         reply: tokio::sync::oneshot::Sender<MatchResponse>,
+    },
+    GetObstacles {
+        reply: tokio::sync::oneshot::Sender<ObstaclesResponse>,
     },
     Reset,
 }

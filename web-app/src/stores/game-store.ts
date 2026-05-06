@@ -18,6 +18,16 @@ export interface KillEntry {
   wep: string;
 }
 
+export interface TacticalState {
+  moveTarget: number;
+  candidates: [number, number][];
+  candidateLos: boolean[];
+  path: [number, number][];
+  aimAngle: number;
+  shooting: boolean;
+  rayDistances: number[];
+}
+
 interface GameState {
   entities: EntityState[];
   tick: number;
@@ -29,6 +39,7 @@ interface GameState {
   connected: boolean;
   obstacles: Obstacle[];
   spawnPoints: [number, number][];
+  tacticalStates: Record<number, TacticalState>;
 
   processWorldSnapshot: (tick: number, entities: EntityState[]) => void;
   processKill: (tick: number, killerId: number, victimId: number) => void;
@@ -37,6 +48,7 @@ interface GameState {
   setConnected: (connected: boolean) => void;
   setObstacles: (obstacles: Obstacle[]) => void;
   setSpawnPoints: (spawnPoints: [number, number][]) => void;
+  setTacticalState: (entityId: number, state: TacticalState) => void;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -50,6 +62,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   connected: false,
   obstacles: [],
   spawnPoints: [],
+  tacticalStates: {},
 
   processWorldSnapshot: (tick, entities) => {
     const entityIdMap: Record<number, EntityState> = {};
@@ -88,4 +101,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   setConnected: (connected) => set({ connected }),
   setObstacles: (obstacles) => set({ obstacles }),
   setSpawnPoints: (spawnPoints) => set({ spawnPoints }),
+  setTacticalState: (entityId, state) => set(s => ({
+    tacticalStates: { ...s.tacticalStates, [entityId]: state },
+  })),
 }));

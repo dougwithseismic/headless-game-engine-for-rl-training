@@ -70,6 +70,7 @@ async fn main() {
         .route("/api/match", get(api::match_status))
         .route("/api/match/reset", post(api::match_reset))
         .route("/api/config", get(api::config))
+        .route("/api/obstacles", get(api::obstacles))
         .route("/ws/observe", get(ws::ws_observe))
         .route("/ws/play", get(ws::ws_play))
         .fallback_service(ServeDir::new("web-app/dist"))

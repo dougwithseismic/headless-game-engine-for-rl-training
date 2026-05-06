@@ -5,12 +5,13 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use ghostlobby_engine::config::GameConfig;
+use ghostlobby_engine::ecs::resources::{ObstacleLayout, SpawnPointPool};
 use ghostlobby_engine::scenarios::tactical_deathmatch::TacticalDeathmatchScenario;
 use ghostlobby_engine::tick::{TickMode, TickRunner};
 use ghostlobby_telemetry::ws_sink::WsSink;
 use ghostlobby_telemetry::TelemetrySink;
 
-use crate::api::MatchResponse;
+use crate::api::{MatchResponse, ObstacleRectDto, ObstaclesResponse};
 use crate::state::EngineCommand;
 
 pub async fn run_tick_loop(
@@ -74,6 +75,32 @@ pub async fn run_tick_loop(
                         tick: runner.tick_count(),
                         tick_rate: runner.config().tick_rate,
                         status: "running".into(),
+                    });
+                }
+                EngineCommand::GetObstacles { reply } => {
+                    let world = runner.world();
+                    let obstacles = world
+                        .get_resource::<ObstacleLayout>()
+                        .map(|layout| {
+                            layout
+                                .0
+                                .iter()
+                                .map(|r| ObstacleRectDto {
+                                    x: r.x,
+                                    y: r.y,
+                                    width: r.width,
+                                    height: r.height,
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let spawn_points = world
+                        .get_resource::<SpawnPointPool>()
+                        .map(|pool| pool.0.iter().map(|v| [v.x, v.y]).collect())
+                        .unwrap_or_default();
+                    let _ = reply.send(ObstaclesResponse {
+                        obstacles,
+                        spawn_points,
                     });
                 }
                 EngineCommand::Reset => {

@@ -52,8 +52,6 @@ export function GameCanvas({ arenaW, arenaH }: GameCanvasProps) {
           display: fog ? '' : 'none',
         }}
       />
-      <div className="scanlines" />
-      <div className="vignette" />
       <HudOverlay />
       <CanvasControls />
       <Minimap mmRef={mmCanvasRef} />

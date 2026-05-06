@@ -55,4 +55,15 @@ pub enum TelemetryEvent {
         tick: u64,
         entity_count: usize,
     },
+    TacticalState {
+        tick: u64,
+        entity: u64,
+        move_target: u8,
+        candidates: Vec<[f32; 2]>,
+        candidate_los: Vec<bool>,
+        path: Vec<[f32; 2]>,
+        aim_angle: f32,
+        shooting: bool,
+        ray_distances: Vec<f32>,
+    },
 }

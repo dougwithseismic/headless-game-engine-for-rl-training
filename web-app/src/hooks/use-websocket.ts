@@ -6,6 +6,7 @@ import { useGameStore } from '../stores/game-store';
 import { useCameraStore } from '../stores/camera-store';
 import { TEAM_COLORS, shortId } from '../constants';
 import { spawnParticles, spawnDmgNumber, spawnDecal, spawnRipple } from '../renderer/draw-effects';
+import { getEntityAnim } from '../types/effects';
 
 export function useWebSocket(effectsRef: MutableRefObject<EffectsState>) {
   const snapCountRef = useRef(0);
@@ -47,22 +48,15 @@ export function useWebSocket(effectsRef: MutableRefObject<EffectsState>) {
           '<span class="timestamp">[000000]</span> <span class="event-type">SYS  </span> connected to /ws/observe'
         );
 
-        // Fallback: fetch obstacles from REST if no RoundStart arrives within 2s
-        const fallbackTimer = setTimeout(() => {
-          if (useGameStore.getState().obstacles.length === 0) {
-            fetch('/api/obstacles')
-              .then(r => r.json())
-              .then((data: { obstacles: Array<{ x: number; y: number; width: number; height: number }>; spawn_points: Array<[number, number]> }) => {
-                const store = useGameStore.getState();
-                if (store.obstacles.length === 0) {
-                  store.setObstacles(data.obstacles ?? []);
-                  store.setSpawnPoints(data.spawn_points ?? []);
-                }
-              })
-              .catch(() => { /* ignore fallback errors */ });
-          }
-        }, 2000);
-        ws.addEventListener('close', () => clearTimeout(fallbackTimer), { once: true });
+        // Fetch live obstacle positions from the engine immediately
+        fetch('/api/obstacles')
+          .then(r => r.json())
+          .then((data: { obstacles: Array<{ x: number; y: number; width: number; height: number }>; spawn_points: Array<[number, number]> }) => {
+            const store = useGameStore.getState();
+            store.setObstacles(data.obstacles ?? []);
+            store.setSpawnPoints(data.spawn_points ?? []);
+          })
+          .catch(() => { /* server may not support this endpoint yet */ });
       };
 
       ws.onclose = () => {
@@ -104,6 +98,8 @@ export function useWebSocket(effectsRef: MutableRefObject<EffectsState>) {
               if (target) {
                 spawnParticles(effects, target.position[0], target.position[1], '#ff6b6b', 5, 'damage');
                 spawnDmgNumber(effects, target.position[0], target.position[1], d.amount || 10, '#ff6b6b');
+                const targetAnim = getEntityAnim(effects, d.target);
+                targetAnim.hitFlash = 1;
               }
               const ts = String(d.tick).padStart(6, '0');
               useGameStore.getState().addLogEntry(
@@ -122,6 +118,11 @@ export function useWebSocket(effectsRef: MutableRefObject<EffectsState>) {
                 alpha: 1,
               });
               spawnRipple(effects, d.origin[0], d.origin[1]);
+              const shooterAnim = getEntityAnim(effects, d.shooter);
+              shooterAnim.recoil = 1;
+              shooterAnim.muzzleFlash = 1;
+              shooterAnim.shotDirX = d.direction[0];
+              shooterAnim.shotDirY = d.direction[1];
               break;
             }
 
@@ -144,6 +145,19 @@ export function useWebSocket(effectsRef: MutableRefObject<EffectsState>) {
               store.addLogEntry(
                 `<span class="timestamp">[${ts}]</span> <span class="event-type event-spawn">ROUND</span> new round started (${d.obstacles?.length ?? 0} obstacles)`
               );
+              break;
+            }
+
+            case 'TacticalState': {
+              useGameStore.getState().setTacticalState(d.entity, {
+                moveTarget: d.move_target,
+                candidates: d.candidates,
+                candidateLos: d.candidate_los,
+                path: d.path,
+                aimAngle: d.aim_angle,
+                shooting: d.shooting,
+                rayDistances: d.ray_distances ?? [],
+              });
               break;
             }
           }

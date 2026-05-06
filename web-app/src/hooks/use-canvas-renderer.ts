@@ -34,7 +34,7 @@ export function useCanvasRenderer(
       const mmCanvas = mmCanvasRef.current;
       const mmCtx = mmCanvas?.getContext('2d') ?? null;
 
-      const { entities, obstacles } = useGameStore.getState();
+      const { entities, obstacles, tacticalStates } = useGameStore.getState();
       const camera = useCameraStore.getState();
       const opts = useRenderStore.getState();
 
@@ -73,7 +73,8 @@ export function useCanvasRenderer(
         entities,
         effects: effectsRef.current,
         obstacles,
-        opts: { fog: opts.fog, glow: opts.glow, grid: opts.grid, trails: opts.trails, weather: opts.weather },
+        tacticalStates,
+        opts: { fog: opts.fog, glow: opts.glow, grid: opts.grid, trails: opts.trails, weather: opts.weather, tactical: opts.tactical },
         followId: cam.followId,
       });
 

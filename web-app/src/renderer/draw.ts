@@ -1,12 +1,14 @@
 import { drawBackground, drawArenaBounds, drawLineGrid, drawDotGrid } from './draw-arena';
 import { drawObstacles, drawRain } from './draw-obstacles';
 import { drawEntities } from './draw-entities';
+import { drawTacticalOverlay } from './draw-tactical';
 import { drawDecals, drawAmbient, drawRipples, drawShots, drawParticles, drawDmgNumbers } from './draw-effects';
 import { drawFog } from './draw-fog';
 import { drawMinimap } from './draw-minimap';
 import type { CameraParams } from './math';
 import type { EntityState } from '../types/telemetry';
 import type { EffectsState } from '../types/effects';
+import type { TacticalState } from '../stores/game-store';
 
 export interface DrawContext {
   ctx: CanvasRenderingContext2D;
@@ -21,12 +23,13 @@ export interface DrawContext {
   entities: EntityState[];
   effects: EffectsState;
   obstacles: Array<{ x: number; y: number; width: number; height: number }>;
-  opts: { fog: boolean; glow: boolean; grid: boolean; trails: boolean; weather: boolean };
+  tacticalStates: Record<number, TacticalState>;
+  opts: { fog: boolean; glow: boolean; grid: boolean; trails: boolean; weather: boolean; tactical: boolean };
   followId: number | null;
 }
 
 export function drawFrame(dc: DrawContext) {
-  const { ctx, canvas, cam, arenaW, arenaH, entities, effects, obstacles, opts, followId } = dc;
+  const { ctx, canvas, cam, arenaW, arenaH, entities, effects, obstacles, tacticalStates, opts, followId } = dc;
   const w = canvas.width, h = canvas.height;
 
   drawBackground(ctx, w, h);
@@ -45,6 +48,11 @@ export function drawFrame(dc: DrawContext) {
   drawShots(ctx, w, h, cam, canvas, arenaW, arenaH, effects, opts.glow);
   drawParticles(ctx, w, h, cam, canvas, arenaW, arenaH, effects, opts.glow);
   drawEntities(ctx, w, h, cam, canvas, arenaW, arenaH, entities, effects, opts, followId);
+
+  if (opts.tactical) {
+    drawTacticalOverlay(ctx, w, h, cam, canvas, arenaW, arenaH, entities, tacticalStates);
+  }
+
   drawDmgNumbers(ctx, w, h, cam, canvas, arenaW, arenaH, effects);
 
   if (opts.weather) {

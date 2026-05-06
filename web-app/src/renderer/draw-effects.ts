@@ -45,7 +45,7 @@ export function drawAmbient(
     const [cx, cy] = toCanvas(p.x, p.y, canvas, arenaW, arenaH, cam);
     if (cx < -5 || cx > w + 5 || cy < -5 || cy > h + 5) continue;
     ctx.globalAlpha = p.alpha;
-    ctx.fillStyle = '#8b5cf6';
+    ctx.fillStyle = '#52525b';
     const sz = p.size * s / 0.7;
     ctx.fillRect(cx, cy, sz, sz);
   }
@@ -67,7 +67,7 @@ export function drawRipples(
     if (r.alpha <= 0) return false;
     const [cx, cy] = toCanvas(r.x, r.y, canvas, arenaW, arenaH, cam);
     const rad = r.radius * s / 0.7;
-    ctx.strokeStyle = `rgba(139,92,246,${r.alpha * 0.3})`;
+    ctx.strokeStyle = `rgba(82,82,91,${r.alpha * 0.3})`;
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.arc(cx, cy, rad, 0, Math.PI * 2); ctx.stroke();
     return true;
@@ -105,7 +105,7 @@ export function drawShots(
       ctx.strokeStyle = `rgba(255,220,80,${t.alpha})`;
       ctx.lineWidth = 1.5;
     } else {
-      ctx.strokeStyle = `rgba(80,80,120,${t.alpha * 0.4})`;
+      ctx.strokeStyle = `rgba(82,82,91,${t.alpha * 0.4})`;
       ctx.lineWidth = 0.5;
     }
     ctx.stroke();
@@ -199,7 +199,7 @@ export function initAmbient(effects: EffectsState, arenaW: number, arenaH: numbe
       vx: (Math.random() - 0.5) * 8,
       vy: (Math.random() - 0.5) * 8,
       size: 0.5 + Math.random() * 1.5,
-      alpha: 0.1 + Math.random() * 0.15,
+      alpha: 0.08 + Math.random() * 0.1,
     });
   }
 }

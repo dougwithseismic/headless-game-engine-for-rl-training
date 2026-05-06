@@ -10,10 +10,10 @@ export function drawMinimap(
   camX: number, camY: number, camZoom: number,
   followId: number | null,
 ) {
-  mmCtx.fillStyle = '#08080f';
+  mmCtx.fillStyle = '#0a0a0c';
   mmCtx.fillRect(0, 0, mmW, mmH);
 
-  mmCtx.strokeStyle = '#111120';
+  mmCtx.strokeStyle = '#141416';
   mmCtx.lineWidth = 0.3;
   for (let x = 0; x <= arenaW; x += 200) {
     const mx = (x / arenaW) * mmW;
@@ -24,11 +24,11 @@ export function drawMinimap(
     mmCtx.beginPath(); mmCtx.moveTo(0, my); mmCtx.lineTo(mmW, my); mmCtx.stroke();
   }
 
-  mmCtx.strokeStyle = '#222240';
+  mmCtx.strokeStyle = '#27272a';
   mmCtx.lineWidth = 0.5;
   mmCtx.strokeRect(0, 0, mmW, mmH);
 
-  mmCtx.fillStyle = '#181830';
+  mmCtx.fillStyle = '#1e1e22';
   for (const obs of obstacles) {
     const ox = (obs.x / arenaW) * mmW;
     const oy = (obs.y / arenaH) * mmH;
@@ -46,9 +46,9 @@ export function drawMinimap(
       continue;
     }
     if (e.id === followId) {
-      mmCtx.fillStyle = '#22d3ee';
+      mmCtx.fillStyle = '#3b82f6';
       mmCtx.fillRect(mx - 2, my - 2, 4, 4);
-      mmCtx.strokeStyle = '#22d3ee';
+      mmCtx.strokeStyle = '#3b82f6';
       mmCtx.lineWidth = 0.5;
       mmCtx.beginPath(); mmCtx.moveTo(mx, my);
       mmCtx.lineTo(mx + Math.cos(e.facing) * 6, my + Math.sin(e.facing) * 6);
@@ -63,7 +63,7 @@ export function drawMinimap(
     const vw = arenaW / camZoom, vh = arenaH / camZoom;
     const vx = ((camX - vw / 2) / arenaW) * mmW;
     const vy = ((camY - vh / 2) / arenaH) * mmH;
-    mmCtx.strokeStyle = '#22d3ee60';
+    mmCtx.strokeStyle = '#3b82f660';
     mmCtx.lineWidth = 1;
     mmCtx.strokeRect(vx, vy, (vw / arenaW) * mmW, (vh / arenaH) * mmH);
   }

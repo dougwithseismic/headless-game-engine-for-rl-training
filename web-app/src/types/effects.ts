@@ -39,6 +39,15 @@ export interface AmbientParticle {
   size: number; alpha: number;
 }
 
+export interface EntityAnimState {
+  recoil: number;
+  muzzleFlash: number;
+  hitFlash: number;
+  shotDirX: number;
+  shotDirY: number;
+  deathTime: number;
+}
+
 export interface EffectsState {
   particles: Particle[];
   shotTraces: ShotTrace[];
@@ -48,6 +57,7 @@ export interface EffectsState {
   ambientParticles: AmbientParticle[];
   prevPositions: Record<number, { x: number; y: number }>;
   entityIdMap: Record<number, EntityState>;
+  entityAnims: Record<number, EntityAnimState>;
   hoverEntity: EntityState | null;
   mouseCanvasX: number;
   mouseCanvasY: number;
@@ -63,8 +73,18 @@ export function createEffectsState(): EffectsState {
     ambientParticles: [],
     prevPositions: {},
     entityIdMap: {},
+    entityAnims: {},
     hoverEntity: null,
     mouseCanvasX: 0,
     mouseCanvasY: 0,
   };
+}
+
+export function getEntityAnim(effects: EffectsState, id: number): EntityAnimState {
+  let anim = effects.entityAnims[id];
+  if (!anim) {
+    anim = { recoil: 0, muzzleFlash: 0, hitFlash: 0, shotDirX: 1, shotDirY: 0, deathTime: 0 };
+    effects.entityAnims[id] = anim;
+  }
+  return anim;
 }

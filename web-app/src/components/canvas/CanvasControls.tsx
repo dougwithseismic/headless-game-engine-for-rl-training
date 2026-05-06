@@ -1,7 +1,7 @@
 import { useRenderStore } from '../../stores/render-store';
 import { useCameraStore } from '../../stores/camera-store';
 
-const TOGGLES = ['fog', 'glow', 'grid', 'trails', 'weather'] as const;
+const TOGGLES = ['fog', 'glow', 'grid', 'trails', 'weather', 'tactical'] as const;
 
 export function CanvasControls() {
   const store = useRenderStore();

@@ -25,8 +25,6 @@ function obstacleSeed(obs: { x: number; y: number; width: number; height: number
   return ((obs.x * 7919 + obs.y * 6271 + obs.width * 3571 + obs.height * 2999) >>> 0);
 }
 
-// ── Main entry ──────────────────────────────────────────────────────
-
 export function drawObstacles(
   ctx: CanvasRenderingContext2D,
   w: number, h: number,
@@ -48,19 +46,16 @@ export function drawObstacles(
     const seed = obstacleSeed(obs);
     const kind = classify(obs.width, obs.height);
 
-    // 1 — drop shadow
-    ctx.fillStyle = '#04040a';
+    ctx.fillStyle = '#060608';
     ctx.fillRect(ox + 3, oy + 3, ow, oh);
 
-    // 2 — base fill with vertical gradient
     const baseGrad = ctx.createLinearGradient(ox, oy, ox, oy + oh);
-    baseGrad.addColorStop(0, '#161634');
-    baseGrad.addColorStop(0.45, '#111128');
-    baseGrad.addColorStop(1, '#0b0b1e');
+    baseGrad.addColorStop(0, '#1c1c1f');
+    baseGrad.addColorStop(0.45, '#161618');
+    baseGrad.addColorStop(1, '#0f0f11');
     ctx.fillStyle = baseGrad;
     ctx.fillRect(ox, oy, ow, oh);
 
-    // 3 — clip for internal details
     ctx.save();
     ctx.beginPath();
     ctx.rect(ox, oy, ow, oh);
@@ -86,7 +81,6 @@ export function drawObstacles(
 
     ctx.restore();
 
-    // 4 — effects outside clip bounds
     drawEdgeLighting(ctx, ox, oy, ow, oh, s, mulberry32(seed + 6), now);
 
     if (weather) {
@@ -94,26 +88,23 @@ export function drawObstacles(
       drawPuddle(ctx, ox, oy, ow, oh, s, seed, now);
     }
 
-    // 5 — border
-    ctx.strokeStyle = '#222250';
+    ctx.strokeStyle = '#27272a';
     ctx.lineWidth = 1.2;
     ctx.strokeRect(ox, oy, ow, oh);
-    ctx.strokeStyle = '#3a3a6a';
+    ctx.strokeStyle = '#3f3f46';
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox + ow, oy); ctx.stroke();
-    ctx.strokeStyle = '#0a0a1e';
+    ctx.strokeStyle = '#0c0c0e';
     ctx.beginPath(); ctx.moveTo(ox, oy + oh); ctx.lineTo(ox + ow, oy + oh); ctx.stroke();
   }
 }
-
-// ── Structural frame lines ──────────────────────────────────────────
 
 function drawStructure(
   ctx: CanvasRenderingContext2D,
   ox: number, oy: number, ow: number, oh: number,
   s: number, kind: ObstacleKind, rand: () => number, zoom: number, now: number,
 ) {
-  ctx.strokeStyle = '#2a2a55';
+  ctx.strokeStyle = '#2a2a2e';
   ctx.lineWidth = 0.8;
 
   switch (kind) {
@@ -129,7 +120,7 @@ function drawStructure(
       if (zoom > 2) {
         const ax = ox + ow * (0.3 + rand() * 0.4);
         const antH = Math.min(8, 12 * s / 0.7);
-        ctx.strokeStyle = '#3a3a60';
+        ctx.strokeStyle = '#3f3f46';
         ctx.lineWidth = 1;
         ctx.beginPath(); ctx.moveTo(ax, oy); ctx.lineTo(ax, oy - antH); ctx.stroke();
         ctx.fillStyle = '#ef4444';
@@ -156,7 +147,7 @@ function drawStructure(
       ctx.stroke();
       if (zoom > 2.5) {
         const bLen = Math.min(6, 10 * s / 0.7);
-        ctx.strokeStyle = '#2a2a50';
+        ctx.strokeStyle = '#2a2a2e';
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(ox + 2, oy + bLen + 2); ctx.lineTo(ox + 2, oy + 2); ctx.lineTo(ox + bLen + 2, oy + 2);
@@ -179,9 +170,7 @@ function drawStructure(
   }
 }
 
-// ── Windows ─────────────────────────────────────────────────────────
-
-const ACCENTS = ['#22d3ee', '#8b5cf6', '#fbbf24', '#22c55e'];
+const ACCENTS = ['#60a5fa', '#f59e0b', '#22c55e', '#ef4444'];
 
 function drawWindows(
   ctx: CanvasRenderingContext2D,
@@ -212,19 +201,19 @@ function drawWindows(
 
       if (lit[idx]) {
         const flicker = 0.55 + 0.45 * Math.sin(now * (1.3 + rand() * 2) + idx * 1.7);
-        ctx.globalAlpha = 0.25 * flicker;
+        ctx.globalAlpha = 0.2 * flicker;
         ctx.fillStyle = accent;
         ctx.fillRect(wx - 2, wy - 2, winSize + 4, winSize + 4);
-        ctx.globalAlpha = 0.6 * flicker;
+        ctx.globalAlpha = 0.5 * flicker;
         ctx.fillRect(wx, wy, winSize, winSize);
       } else {
         ctx.globalAlpha = 0.5;
-        ctx.fillStyle = '#050510';
+        ctx.fillStyle = '#08080a';
         ctx.fillRect(wx, wy, winSize, winSize);
       }
 
       ctx.globalAlpha = 0.25;
-      ctx.strokeStyle = '#2a2a50';
+      ctx.strokeStyle = '#2a2a2e';
       ctx.lineWidth = 0.5;
       ctx.strokeRect(wx, wy, winSize, winSize);
       ctx.globalAlpha = 1;
@@ -232,8 +221,6 @@ function drawWindows(
     }
   }
 }
-
-// ── Door ────────────────────────────────────────────────────────────
 
 function drawDoor(
   ctx: CanvasRenderingContext2D,
@@ -245,36 +232,33 @@ function drawDoor(
   const doorX = ox + (ow - doorW) * (0.3 + rand() * 0.4);
   const doorY = oy + oh - doorH;
 
-  ctx.fillStyle = '#050510';
+  ctx.fillStyle = '#08080a';
   ctx.globalAlpha = 0.6;
   ctx.fillRect(doorX, doorY, doorW, doorH);
 
-  ctx.strokeStyle = '#2a2a50';
+  ctx.strokeStyle = '#2a2a2e';
   ctx.lineWidth = 0.5;
   ctx.globalAlpha = 0.4;
   ctx.strokeRect(doorX, doorY, doorW, doorH);
 
-  ctx.fillStyle = '#8b5cf6';
+  ctx.fillStyle = '#f59e0b';
   ctx.globalAlpha = 0.18;
   ctx.fillRect(doorX + doorW - 3, doorY + doorH * 0.45, 2, 3);
 
   ctx.globalAlpha = 0.06;
   const tg = ctx.createLinearGradient(doorX, doorY + doorH, doorX, doorY + doorH + 5);
-  tg.addColorStop(0, '#8b5cf6');
+  tg.addColorStop(0, '#f59e0b');
   tg.addColorStop(1, 'transparent');
   ctx.fillStyle = tg;
   ctx.fillRect(doorX, doorY + doorH, doorW, 5);
   ctx.globalAlpha = 1;
 }
 
-// ── Surface details (vents, hazard stripes, pipes) ──────────────────
-
 function drawSurfaceDetail(
   ctx: CanvasRenderingContext2D,
   ox: number, oy: number, ow: number, oh: number,
   s: number, kind: ObstacleKind, rand: () => number,
 ) {
-  // Vents
   if (rand() > 0.35) {
     const ventW = Math.min(ow * 0.3, Math.max(8, 15 * s / 0.7));
     const ventH = Math.max(1, 2 * s / 0.7);
@@ -282,7 +266,7 @@ function drawSurfaceDetail(
     const ventY = oy + oh * 0.12;
     const ventCount = 1 + Math.floor(rand() * 2);
 
-    ctx.fillStyle = '#07070f';
+    ctx.fillStyle = '#0a0a0c';
     ctx.globalAlpha = 0.5;
     for (let v = 0; v < ventCount; v++) {
       ctx.fillRect(ventX, ventY + v * (ventH + 2), ventW, ventH);
@@ -290,14 +274,13 @@ function drawSurfaceDetail(
     ctx.globalAlpha = 1;
   }
 
-  // Hazard stripe on one edge
   if (rand() > 0.6) {
     const stripeH = Math.max(2, 3 * s / 0.7);
     const isTop = rand() > 0.5;
     const stripeY = isTop ? oy + 1 : oy + oh - stripeH - 1;
     const step = Math.max(4, 6 * s / 0.7);
 
-    ctx.globalAlpha = 0.15;
+    ctx.globalAlpha = 0.12;
     ctx.fillStyle = '#fbbf24';
     for (let sx = ox; sx < ox + ow; sx += step * 2) {
       ctx.fillRect(sx, stripeY, step, stripeH);
@@ -305,16 +288,15 @@ function drawSurfaceDetail(
     ctx.globalAlpha = 1;
   }
 
-  // Pipe run
   if (kind === 'wall' && rand() > 0.3) {
     const pipeY = oy + oh * 0.72;
-    ctx.strokeStyle = '#1c1c3c';
+    ctx.strokeStyle = '#1e1e22';
     ctx.lineWidth = Math.max(1, 1.5 * s / 0.7);
     ctx.globalAlpha = 0.4;
     ctx.beginPath(); ctx.moveTo(ox + 2, pipeY); ctx.lineTo(ox + ow - 2, pipeY); ctx.stroke();
 
     const joints = 2 + Math.floor(rand() * 3);
-    ctx.fillStyle = '#2e2e55';
+    ctx.fillStyle = '#2a2a2e';
     for (let j = 0; j < joints; j++) {
       const jx = ox + ow * (0.15 + (j / joints) * 0.7);
       ctx.fillRect(jx - 1, pipeY - 1.5, 3, 3);
@@ -322,10 +304,9 @@ function drawSurfaceDetail(
     ctx.globalAlpha = 1;
   }
 
-  // Diagonal hatching (subtler version of original)
   const hStep = Math.max(8, 10 * s / 0.7);
-  ctx.globalAlpha = 0.025;
-  ctx.strokeStyle = '#8b5cf6';
+  ctx.globalAlpha = 0.02;
+  ctx.strokeStyle = '#52525b';
   ctx.lineWidth = 0.5;
   ctx.beginPath();
   for (let d = -ow; d < ow + oh; d += hStep) {
@@ -336,15 +317,13 @@ function drawSurfaceDetail(
   ctx.globalAlpha = 1;
 }
 
-// ── Rain streaks & stains (weathering) ──────────────────────────────
-
 function drawWeathering(
   ctx: CanvasRenderingContext2D,
   ox: number, oy: number, ow: number, oh: number,
   s: number, rand: () => number,
 ) {
   const streakCount = Math.max(3, Math.floor(ow / Math.max(8, 12 * s / 0.7)));
-  ctx.strokeStyle = '#4a4a8a';
+  ctx.strokeStyle = '#52525b';
   ctx.lineWidth = 0.5;
 
   for (let i = 0; i < streakCount; i++) {
@@ -373,8 +352,6 @@ function drawWeathering(
   ctx.globalAlpha = 1;
 }
 
-// ── Neon edge lighting ──────────────────────────────────────────────
-
 function drawEdgeLighting(
   ctx: CanvasRenderingContext2D,
   ox: number, oy: number, ow: number, oh: number,
@@ -383,34 +360,32 @@ function drawEdgeLighting(
   const glowW = Math.max(4, 10 * s / 0.7);
   const pulse = 0.65 + 0.35 * Math.sin(now * 1.2 + rand() * 6.28);
   const edges = [rand() > 0.35, rand() > 0.45, rand() > 0.55, rand() > 0.45];
-  const alpha = 0.12 * pulse;
+  const alpha = 0.06 * pulse;
 
   ctx.globalAlpha = alpha;
 
   if (edges[0]) {
     const g = ctx.createLinearGradient(ox, oy, ox, oy - glowW);
-    g.addColorStop(0, '#8b5cf6'); g.addColorStop(1, 'transparent');
+    g.addColorStop(0, '#3f3f46'); g.addColorStop(1, 'transparent');
     ctx.fillStyle = g; ctx.fillRect(ox, oy - glowW, ow, glowW);
   }
   if (edges[1]) {
     const g = ctx.createLinearGradient(ox + ow, oy, ox + ow + glowW, oy);
-    g.addColorStop(0, '#8b5cf6'); g.addColorStop(1, 'transparent');
+    g.addColorStop(0, '#3f3f46'); g.addColorStop(1, 'transparent');
     ctx.fillStyle = g; ctx.fillRect(ox + ow, oy, glowW, oh);
   }
   if (edges[2]) {
     const g = ctx.createLinearGradient(ox, oy + oh, ox, oy + oh + glowW);
-    g.addColorStop(0, '#22d3ee'); g.addColorStop(1, 'transparent');
+    g.addColorStop(0, '#3f3f46'); g.addColorStop(1, 'transparent');
     ctx.fillStyle = g; ctx.fillRect(ox, oy + oh, ow, glowW);
   }
   if (edges[3]) {
     const g = ctx.createLinearGradient(ox, oy, ox - glowW, oy);
-    g.addColorStop(0, '#8b5cf6'); g.addColorStop(1, 'transparent');
+    g.addColorStop(0, '#3f3f46'); g.addColorStop(1, 'transparent');
     ctx.fillStyle = g; ctx.fillRect(ox - glowW, oy, glowW, oh);
   }
   ctx.globalAlpha = 1;
 }
-
-// ── Animated drip particles from top edge ───────────────────────────
 
 function drawDrips(
   ctx: CanvasRenderingContext2D,
@@ -421,7 +396,7 @@ function drawDrips(
   const fallDist = Math.max(8, 22 * s / 0.7);
   const baseY = _oy + oh;
 
-  ctx.strokeStyle = '#7070cc';
+  ctx.strokeStyle = '#52525b';
   ctx.lineWidth = 1;
 
   for (let i = 0; i < dripCount; i++) {
@@ -448,8 +423,6 @@ function drawDrips(
   ctx.globalAlpha = 1;
 }
 
-// ── Puddle reflection at base ───────────────────────────────────────
-
 function drawPuddle(
   ctx: CanvasRenderingContext2D,
   ox: number, oy: number, ow: number, oh: number,
@@ -459,25 +432,23 @@ function drawPuddle(
   const shimmer = 0.55 + 0.45 * Math.sin(now * 1.8 + seed * 0.001);
   const baseY = oy + oh;
 
-  ctx.globalAlpha = 0.12 * shimmer;
+  ctx.globalAlpha = 0.08 * shimmer;
   const g = ctx.createLinearGradient(ox, baseY, ox, baseY + puddleH);
-  g.addColorStop(0, '#8b5cf6'); g.addColorStop(1, 'transparent');
+  g.addColorStop(0, '#52525b'); g.addColorStop(1, 'transparent');
   ctx.fillStyle = g;
   ctx.fillRect(ox - 2, baseY, ow + 4, puddleH);
 
-  ctx.globalAlpha = 0.06 * shimmer;
-  ctx.fillStyle = '#22d3ee';
+  ctx.globalAlpha = 0.04 * shimmer;
+  ctx.fillStyle = '#71717a';
   ctx.fillRect(ox + ow * 0.2, baseY, ow * 0.6, puddleH * 0.5);
 
   ctx.globalAlpha = 1;
 }
 
-// ── Multi-layer parallax rain ───────────────────────────────────────
-
 const RAIN_LAYERS = [
-  { count: 40, speed: 120, len: 4,  lineW: 0.4, alpha: 0.025, wind: 0.8,  color: '#3a3a60' },
-  { count: 30, speed: 220, len: 8,  lineW: 0.7, alpha: 0.04,  wind: 1.5,  color: '#505088' },
-  { count: 15, speed: 380, len: 14, lineW: 1.2, alpha: 0.06,  wind: 2.5,  color: '#6868aa' },
+  { count: 40, speed: 120, len: 4,  lineW: 0.4, alpha: 0.025, wind: 0.8,  color: '#3f3f46' },
+  { count: 30, speed: 220, len: 8,  lineW: 0.7, alpha: 0.04,  wind: 1.5,  color: '#52525b' },
+  { count: 15, speed: 380, len: 14, lineW: 1.2, alpha: 0.06,  wind: 2.5,  color: '#71717a' },
 ];
 
 export function drawRain(
@@ -512,7 +483,6 @@ export function drawRain(
       ctx.lineTo(rx + wind, ry + lenVar);
       ctx.stroke();
 
-      // Splash when drop hits bottom quarter of screen (front layer only)
       if (layer.lineW > 1 && ry > h * 0.75 && ry < h * 0.78) {
         ctx.globalAlpha = 0.04;
         const splashR = 2 + ((hash * 17) & 3);

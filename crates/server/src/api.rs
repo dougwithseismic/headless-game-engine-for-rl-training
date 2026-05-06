@@ -45,6 +45,36 @@ pub async fn match_reset(State(state): State<Arc<AppState>>) -> Json<serde_json:
     Json(serde_json::json!({"status": "reset"}))
 }
 
+#[derive(Serialize)]
+pub struct ObstaclesResponse {
+    pub obstacles: Vec<ObstacleRectDto>,
+    pub spawn_points: Vec<[f32; 2]>,
+}
+
+#[derive(Serialize)]
+pub struct ObstacleRectDto {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+pub async fn obstacles(State(state): State<Arc<AppState>>) -> Json<ObstaclesResponse> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let _ = state
+        .command_tx
+        .send(EngineCommand::GetObstacles { reply: tx })
+        .await;
+
+    match rx.await {
+        Ok(resp) => Json(resp),
+        Err(_) => Json(ObstaclesResponse {
+            obstacles: vec![],
+            spawn_points: vec![],
+        }),
+    }
+}
+
 pub async fn config(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     Json(serde_json::to_value(&state.config).unwrap_or_default())
 }

@@ -1,6 +1,4 @@
-import { useEffect } from 'react';
 import { useGameConfig } from './hooks/use-game-config';
-import { useGameStore } from './stores/game-store';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { GameCanvas } from './components/canvas/GameCanvas';
@@ -14,13 +12,6 @@ export default function App() {
 
   const arenaW = config?.arena.width ?? 1000;
   const arenaH = config?.arena.height ?? 1000;
-
-  // Seed store with config obstacles until a RoundStart event arrives
-  useEffect(() => {
-    if (config?.obstacles && useGameStore.getState().obstacles.length === 0) {
-      useGameStore.getState().setObstacles(config.obstacles);
-    }
-  }, [config]);
 
   return (
     <>

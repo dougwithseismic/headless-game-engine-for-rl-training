@@ -1,7 +1,7 @@
 use bevy_ecs::prelude::*;
 use glam::Vec2;
 
-use crate::action_space::{ActionHead, ActionSpaceDef};
+use crate::action_space::{ActionHead, ActionSpaceDef, RawActionBuffer};
 use crate::config::GameConfig;
 use crate::ecs::components::*;
 use crate::ecs::resources::*;
@@ -14,6 +14,7 @@ use crate::physics::PhysicsState;
 use crate::scenario::{setup_world, Scenario};
 use crate::scripted_ai::{tactical_aggressive_ai, ScriptedAi};
 use crate::sensors;
+use crate::telemetry::TelemetryEvent;
 use crate::tick::EnginePhase;
 
 pub struct TacticalDeathmatchScenario;
@@ -171,6 +172,9 @@ impl Scenario for TacticalDeathmatchScenario {
             (systems::death_system, systems::respawn_system)
                 .chain()
                 .in_set(EnginePhase::StateTransitions),
+        );
+        schedule.add_systems(
+            tactical_telemetry_system.in_set(EnginePhase::Telemetry),
         );
     }
 
@@ -670,6 +674,92 @@ pub fn tactical_combat_system(
         commands
             .entity(hit_entity)
             .insert(LastDamageSource(shooter_entity));
+    }
+}
+
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
+pub fn tactical_telemetry_system(
+    agents: Query<
+        (Entity, &Position, &Team, &Facing, &PathState, &PhysicsHandle),
+        (With<Agent>, Without<Dead>),
+    >,
+    all_agents: Query<(&PhysicsHandle, &Team), (With<Agent>, Without<Dead>)>,
+    obstacles_res: Res<ObstacleColliders>,
+    tick: Res<TickState>,
+    candidate_buffer: Res<CandidatePositionBuffer>,
+    raw_buffer: Res<RawActionBuffer>,
+    action_space: Res<ActionSpaceDef>,
+    tactical_config: Res<TacticalConfig>,
+    physics: Res<PhysicsState>,
+    mut telemetry: ResMut<TelemetryBuffer>,
+) {
+    if !tick.tick.is_multiple_of(2) {
+        return;
+    }
+
+    for (entity, pos, team, facing, path_state, ph) in &agents {
+        let mut move_target: u8 = 0;
+        let mut shooting = false;
+
+        if let Some(raw) = raw_buffer.get(entity)
+            && raw.len() >= action_space.total_size
+        {
+            let move_slice = action_space.extract_head(raw, 0);
+            move_target = (move_slice[0].round() as u8).min(11);
+
+            if action_space.heads.len() > 2 {
+                let shoot_slice = action_space.extract_head(raw, 2);
+                if !shoot_slice.is_empty() && shoot_slice[0] > 0.5 {
+                    shooting = true;
+                }
+            }
+        }
+
+        let mut candidates: Vec<[f32; 2]> = Vec::with_capacity(12);
+        let mut candidate_los: Vec<bool> = Vec::with_capacity(12);
+
+        if let Some(cand_set) = candidate_buffer.get(entity) {
+            for c in &cand_set.positions {
+                candidates.push([c.world_pos.x, c.world_pos.y]);
+                candidate_los.push(c.has_los_to_enemy);
+            }
+        }
+
+        let path: Vec<[f32; 2]> = path_state
+            .waypoints
+            .iter()
+            .map(|wp| [wp.x, wp.y])
+            .collect();
+
+        // Cast sensor rays for vision polygon
+        let agent_collider_data: Vec<_> = all_agents
+            .iter()
+            .filter(|(other_ph, _)| other_ph.collider != ph.collider)
+            .map(|(other_ph, t)| (other_ph.collider, t.0))
+            .collect();
+        let collider_types =
+            sensors::build_collider_type_map(&obstacles_res.0, &agent_collider_data, team.0);
+        let rays = sensors::cast_sensor_rays(
+            &physics,
+            pos.0,
+            ph.collider,
+            tactical_config.sensor_rays,
+            tactical_config.sensor_range,
+            &collider_types,
+        );
+        let ray_distances: Vec<f32> = rays.iter().map(|r| r.distance).collect();
+
+        telemetry.push(TelemetryEvent::TacticalState {
+            tick: tick.tick,
+            entity: entity.to_bits(),
+            move_target,
+            candidates,
+            candidate_los,
+            path,
+            aim_angle: facing.0,
+            shooting,
+            ray_distances,
+        });
     }
 }
 

@@ -14,28 +14,28 @@ export function Header() {
         <span className="logo">GhostLobby</span>
         <span className="logo-sep">/</span>
         <span className="match-title">
-          {config?.title?.toUpperCase() || 'CONNECTING...'}
+          {config?.title || 'Connecting...'}
         </span>
       </div>
       <div className="status-bar">
         <span>
           <span className={`conn-dot${connected ? ' live' : ''}`} />
-          <span>{connected ? 'live' : 'offline'}</span>
+          <span>{connected ? 'Live' : 'Offline'}</span>
         </span>
         <span>
-          <span className="label">tick</span>
+          <span className="label">Tick</span>
           <span className="value">{tick.toLocaleString()}</span>
         </span>
         <span>
-          <span className="label">ent</span>
+          <span className="label">Ent</span>
           <span className="value">{entities.length}</span>
         </span>
         <span>
-          <span className="label">tps</span>
+          <span className="label">TPS</span>
           <span className="value">{tps ? tps.toLocaleString() : '—'}</span>
         </span>
         <span>
-          <span className="label">fps</span>
+          <span className="label">FPS</span>
           <span className="value" id="fps-value">{'—'}</span>
         </span>
       </div>

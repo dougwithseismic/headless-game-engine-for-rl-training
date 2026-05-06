@@ -11,7 +11,7 @@ export function drawFog(
 ) {
   const s = scale(cam, canvas, arenaW);
   fogCtx.clearRect(0, 0, w, h);
-  fogCtx.fillStyle = 'rgba(6,6,12,0.65)';
+  fogCtx.fillStyle = 'rgba(9,9,11,0.65)';
   fogCtx.fillRect(0, 0, w, h);
   fogCtx.globalCompositeOperation = 'destination-out';
 

@@ -31,7 +31,7 @@ export function AgentList() {
               className={`entity-row${isDead ? ' dead' : ''}${isFollowing ? ' following' : ''}`}
               onClick={() => follow(e.id)}
             >
-              <span style={{ color: col, fontSize: '7px' }}>{'⬢'}</span>
+              <div className="entity-team-dot" style={{ background: col }} />
               <span className="entity-id">{shortId(e.id)}</span>
               <span className="entity-weapon">{wep.slice(0, 3)}</span>
               <div className="entity-hp-bar">

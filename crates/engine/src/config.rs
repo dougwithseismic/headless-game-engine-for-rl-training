@@ -38,7 +38,7 @@ pub struct MovementConfig {
 }
 
 fn default_turn_rate() -> f32 {
-    8.0
+    32.0
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
