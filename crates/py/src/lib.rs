@@ -6,8 +6,6 @@ use pyo3::types::PyDict;
 
 use ghostlobby_engine::config::GameConfig;
 use ghostlobby_engine::scenario::{DeathmatchScenario, Scenario};
-use ghostlobby_engine::scenarios::moba_lane::MobaLaneScenario;
-use ghostlobby_engine::scenarios::racing::RacingScenario;
 use ghostlobby_engine::scenarios::tactical_deathmatch::TacticalDeathmatchScenario;
 use ghostlobby_engine::tick::TickRunner;
 
@@ -15,8 +13,6 @@ fn make_scenario(name: &str) -> PyResult<Box<dyn Scenario>> {
     match name {
         "deathmatch" | "fps-deathmatch" | "fps" => Ok(Box::new(DeathmatchScenario)),
         "tactical" | "tactical-deathmatch" => Ok(Box::new(TacticalDeathmatchScenario)),
-        "moba-lane" | "moba" | "lane" => Ok(Box::new(MobaLaneScenario)),
-        "racing" | "race" | "oval-race" => Ok(Box::new(RacingScenario)),
         other => Err(PyValueError::new_err(format!("unknown scenario: {other}"))),
     }
 }
@@ -24,10 +20,6 @@ fn make_scenario(name: &str) -> PyResult<Box<dyn Scenario>> {
 fn detect_scenario(title: &str) -> &str {
     if title.contains("tactical") {
         "tactical"
-    } else if title.contains("race") || title.contains("racing") {
-        "racing"
-    } else if title.contains("moba") || title.contains("lane") {
-        "moba-lane"
     } else {
         "deathmatch"
     }

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 
 use bevy_ecs::prelude::*;
 use glam::Vec2;
@@ -105,33 +105,6 @@ impl PathState {
         self.waypoints.clear();
         self.current_index = 0;
         self.target_candidate = None;
-    }
-}
-
-#[derive(Component, Debug, Clone, Default)]
-pub struct VisitedCells {
-    pub cells: VecDeque<(u16, u16, u64)>,
-}
-
-impl VisitedCells {
-    pub fn record(&mut self, gx: u16, gy: u16, tick: u64) {
-        if !self.cells.iter().any(|(x, y, _)| *x == gx && *y == gy) {
-            self.cells.push_back((gx, gy, tick));
-        }
-    }
-
-    pub fn prune(&mut self, current_tick: u64, window: u64) {
-        while let Some(&(_, _, t)) = self.cells.front() {
-            if current_tick - t > window {
-                self.cells.pop_front();
-            } else {
-                break;
-            }
-        }
-    }
-
-    pub fn unique_count(&self) -> usize {
-        self.cells.len()
     }
 }
 

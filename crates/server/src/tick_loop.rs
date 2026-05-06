@@ -5,8 +5,6 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use ghostlobby_engine::config::GameConfig;
-use ghostlobby_engine::scenarios::moba_lane::MobaLaneScenario;
-use ghostlobby_engine::scenarios::racing::RacingScenario;
 use ghostlobby_engine::scenarios::tactical_deathmatch::TacticalDeathmatchScenario;
 use ghostlobby_engine::tick::{TickMode, TickRunner};
 use ghostlobby_telemetry::ws_sink::WsSink;
@@ -124,16 +122,6 @@ fn build_runner(config: &GameConfig) -> TickRunner {
         info!("using tactical deathmatch scenario");
         TickRunner::builder(config.clone())
             .with_scenario(TacticalDeathmatchScenario)
-            .build()
-    } else if config.title.contains("race") || config.title.contains("racing") {
-        info!("using racing scenario");
-        TickRunner::builder(config.clone())
-            .with_scenario(RacingScenario)
-            .build()
-    } else if config.title.contains("moba") || config.title.contains("lane") {
-        info!("using MOBA lane scenario");
-        TickRunner::builder(config.clone())
-            .with_scenario(MobaLaneScenario)
             .build()
     } else {
         TickRunner::new(config.clone())
