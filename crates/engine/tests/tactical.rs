@@ -333,3 +333,66 @@ fn stability_1000_ticks_with_obstacles() {
     let obs = runner.observe_all();
     assert_eq!(obs.len(), 2);
 }
+
+// -----------------------------------------------------------------------
+// 15. Tactical AI integration — agents use tactical_aggressive_ai and
+//     the scenario runs 200 ticks without panics, with movement and combat
+// -----------------------------------------------------------------------
+#[test]
+fn tactical_ai_integration_200_ticks() {
+    let mut runner = build_tactical(tactical_open_config());
+
+    // Run 200 ticks -- agents should be using tactical_aggressive_ai
+    for _ in 0..200 {
+        runner.tick();
+    }
+
+    assert_eq!(runner.tick_count(), 200);
+
+    let obs = runner.observe_all();
+    assert_eq!(obs.len(), 2, "should have observations for both agents");
+
+    // Verify agents are alive or have fought (check telemetry for activity)
+    let events = runner.drain_telemetry();
+    assert!(!events.is_empty(), "telemetry should not be empty");
+
+    let has_snapshot = events
+        .iter()
+        .any(|e| matches!(e, TelemetryEvent::WorldSnapshot { .. }));
+    assert!(has_snapshot, "should have WorldSnapshot events");
+}
+
+#[test]
+fn tactical_ai_integration_with_obstacles() {
+    let mut runner = build_tactical(tactical_obstacles_config());
+
+    for _ in 0..200 {
+        runner.tick();
+    }
+
+    assert_eq!(runner.tick_count(), 200);
+    let obs = runner.observe_all();
+    assert_eq!(obs.len(), 2);
+}
+
+#[test]
+fn tactical_ai_agents_fire_shots() {
+    // Run enough ticks for the scripted AI agents to encounter each other and fire
+    let mut runner = build_tactical(tactical_open_config());
+
+    for _ in 0..500 {
+        runner.tick();
+    }
+
+    let events = runner.drain_telemetry();
+    let shot_count = events
+        .iter()
+        .filter(|e| matches!(e, TelemetryEvent::ShotFired { .. }))
+        .count();
+
+    // In an open 600x600 arena with 2 agents, they should find each other and shoot
+    assert!(
+        shot_count > 0,
+        "tactical AI agents should fire at least some shots in 500 ticks on an open map, got {shot_count}"
+    );
+}

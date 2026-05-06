@@ -12,6 +12,7 @@ use crate::observation::{
 };
 use crate::physics::PhysicsState;
 use crate::scenario::{setup_world, Scenario};
+use crate::scripted_ai::{tactical_aggressive_ai, ScriptedAi};
 use crate::sensors;
 use crate::tick::EnginePhase;
 
@@ -145,6 +146,7 @@ impl Scenario for TacticalDeathmatchScenario {
             world.entity_mut(entity).insert((
                 EnemyMemory::default(),
                 PathState::default(),
+                ScriptedAi(tactical_aggressive_ai()),
             ));
         }
     }
