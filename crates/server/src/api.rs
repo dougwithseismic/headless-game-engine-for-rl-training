@@ -78,3 +78,12 @@ pub async fn obstacles(State(state): State<Arc<AppState>>) -> Json<ObstaclesResp
 pub async fn config(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
     Json(serde_json::to_value(&state.config).unwrap_or_default())
 }
+
+pub async fn training() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "model_version": 0,
+        "phase": null,
+        "phase_desc": "standalone",
+        "last_reload_ago": 0
+    }))
+}

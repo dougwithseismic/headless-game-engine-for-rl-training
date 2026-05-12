@@ -108,6 +108,11 @@ impl PathState {
     }
 }
 
+#[derive(Component, Debug, Clone, Default)]
+pub struct LosTracker {
+    pub had_los: bool,
+}
+
 // --- Inventory / multi-weapon components ---
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

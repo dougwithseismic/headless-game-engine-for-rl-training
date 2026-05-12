@@ -24,4 +24,6 @@ uuid = { version = "1", features = ["v4", "serde"] }
 pyo3 = { version = "0.25", features = ["extension-module"] }
 thiserror = "2"
 futures-util = "0.3"
+clap = { version = "4", features = ["derive"] }
 rapier2d = { version = "0.22", features = ["simd-stable"] }
+rapier3d = { version = "0.22", features = ["simd-stable"] }

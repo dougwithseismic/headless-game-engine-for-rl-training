@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-GhostLobby -- a headless, config-driven ECS game engine in Rust for RL agent training. Uses Bevy ECS for the simulation core, Rapier2D for physics, Axum for the WebSocket/HTTP server, and PyO3/Maturin for Python bindings. Runs at 230K+ ticks/sec headless.
+GhostLobby -- a headless, config-driven ECS game engine in Rust for RL agent training. Uses Bevy ECS for the simulation core, Rapier2D/3D for physics, Axum for the WebSocket/HTTP server, and PyO3/Maturin for Python bindings. Runs at 19K+ FPS with 32 parallel envs.
 
 ## Commands
 
@@ -12,14 +12,15 @@ GhostLobby -- a headless, config-driven ECS game engine in Rust for RL agent tra
 # Build everything (all workspace members)
 cargo build
 
-# Run the server (default config: arena deathmatch)
+# Run the server (default config, port 3000)
 cargo run --bin ghostlobby-server
-cargo run --bin ghostlobby-server -- configs/oval_race.json
+cargo run --bin ghostlobby-server -- configs/cs_lite/cs_lite.json
+cargo run --bin ghostlobby-server -- configs/tactical/tactical_open.json --port 0  # OS-assigned port
 
 # Run the benchmark (1M ticks)
 cargo run --example benchmark --release -p ghostlobby-engine
 
-# Run tests (61 tests)
+# Run tests
 cargo test -p ghostlobby-engine
 
 # Clippy (strict)
@@ -29,16 +30,33 @@ cargo clippy -p ghostlobby-engine -p ghostlobby-server -p ghostlobby-telemetry -
 source .venv/bin/activate
 cd crates/py && maturin develop --release
 
-# Train an RL agent
-python python/train.py --config configs/1v1_deathmatch.json --timesteps 500000
+# Training pipeline
+cd python
+
+# Collect BC demonstrations from scripted AI
+python scripts/collect_demos.py --scenario cs_lite --config configs/cs_lite/cs_lite.json --episodes 1000
+
+# PPO training
+python scripts/train.py --scenario cs_lite --config configs/cs_lite/cs_lite.json
+
+# Full auto-curriculum (multi-phase PPO with auto-advancement)
+python scripts/train.py --scenario cs_lite --mode curriculum --curriculum configs/cs_lite/curriculum.yaml
 
 # Evaluate a trained model
-python python/evaluate.py --model runs/<run>/final_model.zip --episodes 5
+python scripts/evaluate.py --model runs/<run>/best_model.zip --config configs/cs_lite/cs_lite.json --episodes 10
 
-# Web app (React 19 viewer)
-cd web-app && pnpm dev              # dev server on :5173, proxies to :3000
+# Reward search (hyperparameter sweep)
+python scripts/reward_search.py --config configs/cs_lite/cs_lite.json
+
+# Watch a trained model play
+python scripts/watch_model.py --model runs/<run>/best_model.zip --config configs/cs_lite/cs_lite.json
+
+# Web app
+cd web-app && pnpm dev              # dev server on :5173
 cd web-app && pnpm build            # production build
 cd web-app && npx tsc --noEmit      # type check
+cd web-app && pnpm test             # run vitest
+cd web-app && pnpm test:watch       # vitest watch mode
 ```
 
 ## Architecture
@@ -47,24 +65,32 @@ Cargo workspace with 4 crates:
 
 - **`crates/engine`** -- Core simulation. Bevy ECS with Rapier2D physics. Modular system schedule using `EnginePhase` sets: `ClearBuffers -> AiDecisions -> PrePhysics -> PhysicsStep -> PostPhysics -> GameLogic -> StateTransitions -> Telemetry`. Entry point is `TickRunner` (direct via `::new()` or customisable via `EngineBuilder`).
 - **`crates/telemetry`** -- Sink trait (`TelemetrySink`) with implementations: `WsSink` (broadcast channel -> WebSocket clients), `FileSink` (append JSONL), `BufferSink` (in-memory ring for Python).
-- **`crates/server`** -- Axum HTTP/WS server. Spawns a `TickRunner` in a tokio task, exposes `/api/*` endpoints and `/ws/observe` + `/ws/play`. Serves `web/` as static files.
+- **`crates/server`** -- Axum HTTP/WS server. CLI via clap (`--port`). Spawns a `TickRunner` in a tokio task, exposes `/api/*` endpoints and `/ws/observe` + `/ws/play`. Registers itself in `~/.ghostlobby/sessions.json` on startup, cleans up on Ctrl-C.
 - **`crates/py`** -- PyO3 module (`ghostlobby`). Exposes `GhostLobbyEnv` with `reset()`/`step()` for Gymnasium-style RL training. Supports multiple scenarios.
 
 ## Key Patterns
 
-**Scenario system** -- Game modes implement the `Scenario` trait (8 methods: name, action_space, observation_space, setup, register_systems, observe, reward, is_done). Each scenario is a self-contained game definition. Current scenarios: `DeathmatchScenario`, `MobaLaneScenario`, `RacingScenario`.
+**Scenario system** -- Game modes implement the `Scenario` trait (8 methods: name, action_space, observation_space, setup, register_systems, observe, reward, is_done). Each scenario is a self-contained game definition. Current scenarios: `CsLiteScenario` (3D FPS with Rapier3D), `CsLiteDummyAiScenario` (CsLite with built-in dummy opponent), `TacticalDeathmatchScenario` (2D+A*).
 
 **Action system** -- Actions are flat `Vec<f32>` arrays with multi-head definitions (`ActionSpaceDef`). Each head is either `Continuous { size, low, high }` or `Discrete { n }`. `RawActionBuffer` stores per-entity actions. `ActionMaskBuffer` provides per-tick validity masks.
 
 **Observation system** -- Scenarios implement `observe()` which fills an `ObsWriter` with named feature arrays (self_features, entities, action_mask, etc.). `ObservationSpaceDef` describes shapes. `AgentRegistry` maps agent indices to ECS entities.
 
-**Scripted AI** -- `ScriptedAi` component holds a closure (`AiFn`) that produces `ActionDict` from `AiContext`. Built-in AIs: `aggressive_ai()`, `creep_ai()`, `passive_ai()`, `racing_ai()`. Same action format as RL agents.
+**Scripted AI** -- `ScriptedAi` component holds a closure (`AiFn`) that produces `ActionDict` from `AiContext`. Same action format as RL agents.
 
-**Physics** -- `PhysicsState` wraps Rapier2D directly (not bevy_rapier). `PhysicsHandle` component links ECS entities to Rapier rigid bodies/colliders. Core systems sync between ECS Position/Velocity and Rapier state.
+**Physics** -- `PhysicsState` wraps Rapier2D directly (not bevy_rapier). `Physics3DState` wraps Rapier3D for 3D scenarios (cs_lite). `PhysicsHandle`/`PhysicsHandle3D` components link ECS entities to Rapier rigid bodies/colliders.
 
-**Config-driven** -- All game params live in JSON (`configs/`). `GameConfig` has typed fields for arena/movement/combat/spawning/teams/obstacles, plus a `serde_json::Value` `extra` field for scenario-specific extensions.
+**Config-driven** -- All game params live in JSON. Configs are organized by scenario: `configs/cs_lite/`, `configs/tactical/`. `GameConfig.extra` holds scenario-specific extensions.
 
-**Telemetry** -- `TelemetryBuffer` resource collects events per tick. Events: `WorldSnapshot`, `Damage`, `Kill`, `Spawn`, `ShotFired`, `TickComplete`.
+**Telemetry** -- `TelemetryBuffer` resource collects events per tick. Events: `WorldSnapshot`, `Damage`, `Kill`, `Spawn`, `ShotFired`, `RoundStart`, `TickComplete`, `TacticalState`, `Arena3DState`.
+
+## Session Auto-Discovery
+
+Servers register themselves in `~/.ghostlobby/sessions.json` on startup. The web app auto-discovers active sessions via a Vite middleware at `GET /api/discover`.
+
+**Registry format:** `[{ pid, port, title, config_path, scenario, started_at }]`
+
+**Rust server** writes on startup, removes on Ctrl-C. Prunes dead PIDs on each register.
 
 ## Server Endpoints
 
@@ -72,56 +98,90 @@ Cargo workspace with 4 crates:
 - `GET /api/match` -- current tick, title, status
 - `POST /api/match/reset` -- reset simulation
 - `GET /api/config` -- current GameConfig as JSON
+- `GET /api/training` -- training status (stub in standalone server)
+- `GET /api/obstacles` -- obstacle and spawn point layout
 - `GET /ws/observe` -- read-only telemetry WebSocket
 - `GET /ws/play` -- bidirectional WebSocket (send `{ "source_id": 0, "actions": [...] }`)
 
 ## Training Pipeline
 
-- `python/ghostlobby_gym.py` -- Gymnasium wrapper around `GhostLobbyEnv`
-- `python/train.py` -- SB3 PPO training with CLI args, checkpoints, TensorBoard, eval callbacks
-- `python/evaluate.py` -- Load and evaluate trained models
-- Runs saved to `runs/{name}_{timestamp}/` with experiment.json, checkpoints, tensorboard logs
+Research-backed pipeline: **BC warm-start -> PPO fine-tune with KL anchor + entropy annealing**. Validated: 61% improvement over training from scratch at same step count.
 
-## Web Viewer
+### Python Packages (`python/`)
 
-Two viewer implementations exist:
+- **`glgym/`** -- Gymnasium wrappers. `BaseGhostLobbyGym` base class with `CsLiteGym`, `TacticalGym` subclasses. Handles obs flattening, action remapping (continuous -> discrete bins), curriculum phase masking, opponent management.
+- **`training/`** -- Training infrastructure:
+  - `bc_collector.py` -- Collect (obs, action) demonstrations from scripted AI via the native Rust collector.
+  - `bc_pretrain.py` -- `BCTrainer`: PyTorch supervised learning on demos, saves SB3-compatible .zip + .pt reference for KL anchor.
+  - `ppo_trainer.py` -- `PPOTrainer`: Unified PPO training with optional KL anchor, entropy schedule, self-play, plateau stopping.
+  - `curriculum.py` -- `CurriculumRunner`: YAML-driven multi-phase training with auto-advancement when eval reward exceeds threshold.
+  - `callbacks.py` -- SB3 callbacks: `KLAnchorCallback`, `EntropyScheduleCallback`, `PlateauStopCallback`, `SelfPlaySwapCallback`, `ThroughputCallback`.
+  - `utils.py` -- `resolve_config`, `make_run_dir`, `make_vec_env`, `load_model`.
+- **`scripts/`** -- CLI entry points: `train.py`, `collect_demos.py`, `evaluate.py`, `reward_search.py`, `watch_model.py`.
 
-**`web/index.html`** -- Original standalone Canvas 2D viewer. No build step, served directly by the Rust server at `http://localhost:3000`.
+### Config Organization
 
-**`web-app/`** -- React 19 + TypeScript app (Vite, zustand, React Query). Full port of the original viewer with proper component architecture.
-
-```bash
-# Dev server (proxies /api/* and /ws/* to Rust server on :3000)
-cd web-app && pnpm dev    # http://localhost:5173
-
-# Production build
-cd web-app && pnpm build  # outputs to web-app/dist/
-
-# Type check
-cd web-app && npx tsc --noEmit
+```
+configs/
+  cs_lite/          # 3D FPS scenarios + reward configs
+  tactical/         # 2D tactical scenarios
 ```
 
-### React App Architecture
+### Training Runs
 
-The app splits **React-rendered UI** from the **imperative Canvas draw loop**:
+Runs saved to `runs/{name}_{timestamp}/` with `experiment.json`, `checkpoints/`, `best/`, `eval_logs/`, `tb/` (TensorBoard).
 
-- **React components** (re-render on state change): Header, Sidebar panels (Scoreboard, AgentList, KillFeed, Terminal), HUD overlays, FollowBanner, ZoomIndicator, EntityTooltip
-- **Canvas draw loop** (60fps via rAF, reads zustand via `getState()`): All canvas rendering -- entities, effects, fog, minimap. Lives in `src/renderer/` as pure functions, not React components.
-- **Mutable refs** (never trigger re-renders): particles, shotTraces, dmgNumbers, decals, ripples, prevPositions. Stored in an `EffectsState` ref passed between hooks.
+## Web App (`web-app/`)
 
-### Zustand Stores (`src/stores/`)
+React 19 + TypeScript + Vite + Zustand + React Query + React Router.
 
-- **game-store** -- entities, tick, entityIdMap, kills (max 12), score[], eventLog (max 200), tps, connected. Updated by WebSocket events.
-- **camera-store** -- camX/Y, camZoom (1.0-8.0), followId, isPanning, shakeX/Y/Decay. Read by draw loop via `getState()`, written by camera controls hook.
-- **render-store** -- fog/glow/grid/trails booleans. Toggled by CanvasControls buttons.
+### Pages
 
-### Key Hooks (`src/hooks/`)
+- **`/`** (HomePage) -- Dashboard showing all active sessions. Auto-discovers from `~/.ghostlobby/sessions.json` via `/api/discover` polling. Manual "Add Server" for remote servers.
+- **`/viewer?host=localhost:3000`** (ViewerPage) -- Connects to a specific server. Uses the scenario registry to pick the right Canvas + sidebar panels. Shows live tick/TPS/entity count in header.
 
-- **use-websocket** -- Connects to `/ws/observe`, dispatches events to zustand stores and effects ref. WorldSnapshot updates are rAF-gated to throttle React re-renders.
-- **use-canvas-renderer** -- Owns the `requestAnimationFrame` draw loop. Calls renderer functions sequentially. Reads stores non-reactively.
-- **use-camera-controls** -- Wheel/click/drag/keyboard handlers for zoom, pan, follow, and shortcuts (1-9 to select agents, Esc to reset).
-- **use-game-config** -- React Query fetch of `/api/config` with `staleTime: Infinity`.
+### Scenario Registry (`src/scenarios/`)
 
-### Renderer (`src/renderer/`)
+Each scenario type gets its own folder with a `ScenarioDefinition` export:
 
-Pure imperative Canvas2D functions, each taking `ctx`, camera params, and data. Not React components. Pipeline order: background → arena bounds → grid → obstacles → decals → ambient → ripples → shots → particles → entities → damage numbers → fog → minimap.
+```typescript
+interface ScenarioDefinition {
+  id: string;
+  name: string;
+  match: (config: GameConfig) => boolean;  // first match wins
+  Canvas: ComponentType;                    // main viewport
+  sidebarPanels: ComponentType[];           // sidebar content
+  onTelemetryEvent: (event: TelemetryEvent) => void;
+  onConnect?: () => void;
+  onDisconnect?: () => void;
+}
+```
+
+Register in `src/scenarios/registry.ts`. The `demo` scenario is the fallback (placeholder viewport).
+
+**To add a new scenario viewer:** create `src/scenarios/<name>/`, export a `ScenarioDefinition`, register it in `registry.ts`.
+
+### Key Files
+
+- **`src/contexts/server.tsx`** -- `ServerHostProvider` / `useServerHost()` for per-viewer server targeting
+- **`src/lib/server-url.ts`** -- `apiUrl(host, path)` / `wsUrl(host, path)` -- routes through Vite proxy in dev
+- **`src/stores/dashboard-store.ts`** -- Manual server entries (localStorage)
+- **`src/stores/viewer-store.ts`** -- Shared viewer state (connected, tick, tps, entityCount)
+- **`src/hooks/use-discover.ts`** -- Polls `/api/discover` for auto-discovered sessions
+- **`src/hooks/use-websocket.ts`** -- `useViewerWebSocket(host, scenario, enabled)` -- connects WS, dispatches to scenario
+- **`src/hooks/use-game-config.ts`** -- React Query fetch of `/api/config`
+- **`src/hooks/use-training-info.ts`** -- Polls `/api/training`
+
+### Vite Config
+
+- **Discovery plugin** -- serves `~/.ghostlobby/sessions.json` at `GET /api/discover`
+- **Dynamic proxy** -- `/proxy/:port/*` routes to `http://localhost::port/*` (avoids CORS in dev)
+
+### Testing
+
+Vitest with jsdom, `@testing-library/react`, `@testing-library/jest-dom`. Tests live next to source files as `*.test.ts(x)`.
+
+```bash
+pnpm test          # single run
+pnpm test:watch    # watch mode
+```

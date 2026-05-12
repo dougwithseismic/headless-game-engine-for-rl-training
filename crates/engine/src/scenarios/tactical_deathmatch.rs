@@ -14,7 +14,7 @@ use crate::physics::PhysicsState;
 use crate::scenario::{setup_world, Scenario};
 use crate::scripted_ai::{tactical_aggressive_ai, ScriptedAi};
 use crate::sensors;
-use crate::telemetry::TelemetryEvent;
+use crate::telemetry::{RewardBreakdown, TelemetryEvent};
 use crate::tick::EnginePhase;
 use crate::weapons;
 
@@ -156,6 +156,7 @@ impl Scenario for TacticalDeathmatchScenario {
             world.entity_mut(entity).insert((
                 EnemyMemory::default(),
                 PathState::default(),
+                LosTracker::default(),
                 ScriptedAi(tactical_aggressive_ai()),
                 Inventory {
                     weapons: vec![
@@ -203,6 +204,7 @@ impl Scenario for TacticalDeathmatchScenario {
                 weapons::weapon_switch_system,
                 weapons::inventory_combat_system,
                 update_enemy_memory_system,
+                update_los_tracker_system,
             )
                 .chain()
                 .in_set(EnginePhase::GameLogic),
@@ -317,14 +319,41 @@ impl Scenario for TacticalDeathmatchScenario {
                 false
             };
 
-            if visible && e_team != team {
+            if e_team != team {
+                // God-mode teacher: always provide real enemy state.
+                // LOS flag tells the agent whether it can currently see them.
                 let e_vel = world.get::<Velocity>(e).map(|v| v.0).unwrap_or_default();
                 let e_hp = world
                     .get::<Health>(e)
                     .map(|h| (h.current / h.max).max(0.0))
                     .unwrap_or(0.0);
+                let los = if visible { 1.0 } else { 0.0 };
+                let time_since = if visible {
+                    0.0
+                } else {
+                    memory
+                        .and_then(|m| m.entries.get(&e))
+                        .map(|mem| ((tick - mem.last_seen_tick) as f32 / 300.0).min(1.0))
+                        .unwrap_or(1.0)
+                };
+                let last_known_dx = if visible {
+                    0.0
+                } else {
+                    memory
+                        .and_then(|m| m.entries.get(&e))
+                        .map(|mem| (mem.last_known_pos.x - pos.x) / arena_diag)
+                        .unwrap_or(0.0)
+                };
+                let last_known_dy = if visible {
+                    0.0
+                } else {
+                    memory
+                        .and_then(|m| m.entries.get(&e))
+                        .map(|mem| (mem.last_known_pos.y - pos.y) / arena_diag)
+                        .unwrap_or(0.0)
+                };
                 let threat = if dist > 0.1 {
-                    (1.0 / (dist / arena_diag)) * e_hp
+                    (1.0 / (dist / arena_diag)) * los * e_hp
                 } else {
                     e_hp
                 };
@@ -335,28 +364,12 @@ impl Scenario for TacticalDeathmatchScenario {
                     (e_vel.x - vel.x) / max_speed,
                     (e_vel.y - vel.y) / max_speed,
                     e_hp,
-                    1.0, // visible / LOS = true
-                    0.0, // time_since_seen = 0 (visible now)
-                    0.0, // last_known_pos dx (not needed, currently visible)
-                    0.0, // last_known_pos dy
+                    los,
+                    time_since,
+                    last_known_dx,
+                    last_known_dy,
                     threat.min(10.0) / 10.0,
                 ]);
-            } else if e_team != team {
-                // Not visible — use memory
-                if let Some(mem) = memory.and_then(|m| m.entries.get(&e)) {
-                    let time_since = (tick - mem.last_seen_tick) as f32;
-                    let last_delta = mem.last_known_pos - pos;
-                    entity_data.extend_from_slice(&[
-                        0.0, 0.0, 0.0, 0.0, 0.0,
-                        0.0, // LOS = false
-                        (time_since / 300.0).min(1.0),
-                        last_delta.x / arena_diag,
-                        last_delta.y / arena_diag,
-                        0.0,
-                    ]);
-                } else {
-                    entity_data.extend_from_slice(&[0.0; 10]);
-                }
             }
         }
         writer.write_padded("enemy_state", &entity_data, max_agents * 10);
@@ -482,7 +495,6 @@ impl Scenario for TacticalDeathmatchScenario {
         let pos = world.get::<Position>(agent).map(|p| p.0).unwrap_or_default();
         let team = world.get::<Team>(agent).map(|t| t.0).unwrap_or(0);
         let facing = world.get::<Facing>(agent).map(|f| f.0).unwrap_or(0.0);
-        let bounds = world.resource::<WorldBounds>();
         let tactical_config = world.resource::<TacticalConfig>();
 
         let mut nearest_dist = f32::MAX;
@@ -503,34 +515,37 @@ impl Scenario for TacticalDeathmatchScenario {
             }
         }
 
-        let arena_diag = bounds.diagonal();
         let mut shaping = 0.0;
+        let physics = world.resource::<PhysicsState>();
+        let agent_collider = world.get::<PhysicsHandle>(agent).map(|ph| ph.collider);
 
         if nearest_dist < f32::MAX {
-            shaping += 0.003 * (1.0 - nearest_dist / arena_diag);
+            let nearest_enemy_pos = pos + nearest_dir * nearest_dist;
+            let has_los = physics.has_line_of_sight(pos, nearest_enemy_pos, agent_collider);
 
-            let face_dir = Vec2::new(facing.cos(), facing.sin());
-            let aim_dot = face_dir.dot(nearest_dir);
-            shaping += 0.002 * aim_dot.max(0.0);
-        }
+            let engage_range = 500.0;
+            let dist_frac = (nearest_dist / engage_range).min(1.0);
+            shaping += 0.005 * (1.0 - dist_frac);
 
-        // Time penalty
-        shaping -= 0.0005;
+            if has_los {
+                let face_dir = Vec2::new(facing.cos(), facing.sin());
+                let aim_dot = face_dir.dot(nearest_dir);
+                shaping += 0.003 * aim_dot.max(0.0);
+            }
 
-        // Cover mode rewards
-        if tactical_config.reward_mode == RewardMode::Cover {
-            // Idle penalty: no LOS to enemy and not moving
-            let vel = world.get::<Velocity>(agent).map(|v| v.0).unwrap_or_default();
-            let speed = vel.length();
-            if speed < 10.0 && nearest_dist < f32::MAX {
-                let physics = world.resource::<PhysicsState>();
-                let agent_collider = world.get::<PhysicsHandle>(agent).map(|ph| ph.collider);
-                let nearest_enemy_pos = pos + nearest_dir * nearest_dist;
-                if !physics.has_line_of_sight(pos, nearest_enemy_pos, agent_collider) {
-                    shaping -= 0.02;
+            if tactical_config.reward_mode == RewardMode::Cover && !has_los {
+                let vel = world.get::<Velocity>(agent).map(|v| v.0).unwrap_or_default();
+                let speed = vel.length();
+                // Hiding without LOS: mild penalty even when moving, harsher when stationary
+                if speed < 10.0 {
+                    shaping -= 0.008;
+                } else {
+                    shaping -= 0.002;
                 }
             }
         }
+
+        shaping -= 0.0005;
 
         combat_reward + shaping
     }
@@ -739,7 +754,7 @@ pub fn tactical_combat_system(
             let cover_bonus = if shooter_in_cover
                 && tactical_config.reward_mode == RewardMode::Cover
             {
-                0.3 * damage / max_hp
+                0.5 * damage / max_hp
             } else {
                 0.0
             };
@@ -755,10 +770,11 @@ pub fn tactical_combat_system(
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn tactical_telemetry_system(
     agents: Query<
-        (Entity, &Position, &Team, &Facing, &PathState, &PhysicsHandle),
+        (Entity, &Position, &Velocity, &Team, &Facing, &PathState, &PhysicsHandle, &LosTracker),
         (With<Agent>, Without<Dead>),
     >,
     all_agents: Query<(&PhysicsHandle, &Team), (With<Agent>, Without<Dead>)>,
+    enemy_positions: Query<(Entity, &Position, &Team), (With<Agent>, Without<Dead>)>,
     obstacles_res: Res<ObstacleColliders>,
     tick: Res<TickState>,
     candidate_buffer: Res<CandidatePositionBuffer>,
@@ -766,13 +782,15 @@ pub fn tactical_telemetry_system(
     action_space: Res<ActionSpaceDef>,
     tactical_config: Res<TacticalConfig>,
     physics: Res<PhysicsState>,
+    bounds: Res<WorldBounds>,
+    reward_buffer: Res<RewardBuffer>,
     mut telemetry: ResMut<TelemetryBuffer>,
 ) {
     if !tick.tick.is_multiple_of(2) {
         return;
     }
 
-    for (entity, pos, team, facing, path_state, ph) in &agents {
+    for (entity, pos, vel, team, facing, path_state, ph, los_tracker) in &agents {
         let mut move_target: u8 = 0;
         let mut shooting = false;
 
@@ -824,6 +842,55 @@ pub fn tactical_telemetry_system(
         );
         let ray_distances: Vec<f32> = rays.iter().map(|r| r.distance).collect();
 
+        // Compute reward breakdown
+        let arena_diag = bounds.diagonal();
+        let mut proximity = 0.0f32;
+        let mut aim = 0.0f32;
+        let mut idle_penalty = 0.0f32;
+        let mut los_gain = 0.0f32;
+        let mut nearest_dist = f32::MAX;
+        let mut nearest_dir = Vec2::ZERO;
+
+        for (e, e_pos, e_team) in &enemy_positions {
+            if e == entity || e_team.0 == team.0 {
+                continue;
+            }
+            let d = pos.0.distance(e_pos.0);
+            if d < nearest_dist {
+                nearest_dist = d;
+                nearest_dir = (e_pos.0 - pos.0).normalize_or_zero();
+            }
+        }
+
+        if nearest_dist < f32::MAX {
+            proximity = 0.003 * (1.0 - nearest_dist / arena_diag);
+            let face_dir = Vec2::new(facing.0.cos(), facing.0.sin());
+            aim = 0.002 * face_dir.dot(nearest_dir).max(0.0);
+        }
+
+        if tactical_config.reward_mode == RewardMode::Cover {
+            if vel.0.length() < 10.0 && nearest_dist < f32::MAX {
+                let nearest_enemy_pos = pos.0 + nearest_dir * nearest_dist;
+                if !physics.has_line_of_sight(pos.0, nearest_enemy_pos, Some(ph.collider)) {
+                    idle_penalty = -0.02;
+                }
+            }
+            if los_tracker.had_los {
+                los_gain = 0.1;
+            }
+        }
+
+        let combat = reward_buffer.get(entity);
+        let breakdown = RewardBreakdown {
+            proximity,
+            aim,
+            time_penalty: -0.0005,
+            cover_bonus: 0.0, // tracked in combat system, already in `combat`
+            idle_penalty,
+            los_gain,
+            combat,
+        };
+
         telemetry.push(TelemetryEvent::TacticalState {
             tick: tick.tick,
             entity: entity.to_bits(),
@@ -834,6 +901,7 @@ pub fn tactical_telemetry_system(
             aim_angle: facing.0,
             shooting,
             ray_distances,
+            rewards: Some(breakdown),
         });
     }
 }
@@ -876,6 +944,34 @@ pub fn update_enemy_memory_system(
         memory
             .entries
             .retain(|_, entry| tick.tick - entry.last_seen_tick < 600);
+    }
+}
+
+pub fn update_los_tracker_system(
+    mut agents: Query<(Entity, &Position, &Team, &mut LosTracker, &PhysicsHandle), Without<Dead>>,
+    targets: Query<(Entity, &Position, &Team), Without<Dead>>,
+    physics: Res<PhysicsState>,
+    mut rewards: ResMut<RewardBuffer>,
+    tactical_config: Res<TacticalConfig>,
+) {
+    if tactical_config.reward_mode != RewardMode::Cover {
+        return;
+    }
+    for (entity, pos, team, mut tracker, ph) in &mut agents {
+        let mut has_los_now = false;
+        for (target_e, target_pos, target_team) in &targets {
+            if target_e == entity || target_team.0 == team.0 {
+                continue;
+            }
+            if physics.has_line_of_sight(pos.0, target_pos.0, Some(ph.collider)) {
+                has_los_now = true;
+                break;
+            }
+        }
+        if has_los_now && !tracker.had_los {
+            rewards.add(entity, 0.1);
+        }
+        tracker.had_los = has_los_now;
     }
 }
 

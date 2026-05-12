@@ -1,0 +1,21 @@
+{
+  "title": "tactical-obstacles",
+  "tick_rate": 64,
+  "arena": { "width": 600, "height": 600 },
+  "movement": { "max_speed": 200, "acceleration": 1000, "friction": 800, "turn_rate": 12.0 },
+  "combat": { "default_weapon": { "damage": 34, "fire_rate": 0.3, "range": 400 } },
+  "spawning": { "respawn_delay": 0.5, "round_time_limit": 15.0 },
+  "teams": { "count": 2, "players_per_team": 1 },
+  "obstacles": [
+    { "x": 275, "y": 250, "width": 50, "height": 100 },
+    { "x": 150, "y": 125, "width": 15, "height": 120 },
+    { "x": 435, "y": 355, "width": 15, "height": 120 }
+  ],
+  "extra": {
+    "scenario": "tactical",
+    "reward_mode": "cover",
+    "candidate_distance": 45.0,
+    "sensor_rays": 64,
+    "sensor_range": 500.0
+  }
+}

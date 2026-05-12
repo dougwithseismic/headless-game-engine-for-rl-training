@@ -88,14 +88,6 @@ header {
 /* ── Layout ── */
 .main { flex: 1; display: flex; overflow: hidden; }
 
-/* ── Canvas ── */
-.canvas-wrap {
-  flex: 1; position: relative; display: flex;
-  align-items: center; justify-content: center; background: var(--bg-deep);
-}
-canvas#arena { border-radius: 2px; }
-canvas#fog { position: absolute; pointer-events: none; z-index: 1; border-radius: 2px; }
-
 /* ── HUD ── */
 .hud-overlay {
   position: absolute; top: 12px; left: 16px; z-index: 5;
@@ -237,6 +229,24 @@ canvas#fog { position: absolute; pointer-events: none; z-index: 1; border-radius
   font-size: 11px; color: var(--text-muted); width: 32px; text-align: right;
   font-family: var(--mono); font-variant-numeric: tabular-nums;
 }
+.entity-info { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.entity-main-row { display: flex; align-items: center; gap: 6px; }
+.agent-tag {
+  font-size: 10px; padding: 1px 5px; border-radius: 3px;
+  font-family: var(--mono); font-weight: 500; white-space: nowrap;
+}
+.agent-tag.model {
+  background: rgba(59, 130, 246, 0.12); color: var(--accent-text);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+.agent-tag.scripted {
+  background: rgba(250, 204, 21, 0.08); color: var(--team-yellow);
+  border: 1px solid rgba(250, 204, 21, 0.15);
+}
+.agent-detail {
+  font-size: 10px; color: var(--text-muted); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
 
 /* Kill feed */
 .kill-feed { list-style: none; }
@@ -294,3 +304,328 @@ canvas#fog { position: absolute; pointer-events: none; z-index: 1; border-radius
 .log-line .hl-key { color: var(--text-secondary); }
 .log-line .hl-bracket { color: #52525b; }
 .log-line .hl-id { color: var(--team-blue); }
+
+/* Training Panel */
+.training-panel .panel-badge.new-version {
+  background: rgba(59, 130, 246, 0.15); color: var(--accent-text);
+  animation: versionFlash 2s ease;
+}
+@keyframes versionFlash {
+  0%, 100% { background: rgba(59, 130, 246, 0.15); }
+  15% { background: rgba(59, 130, 246, 0.35); color: #fff; }
+}
+.training-grid { display: flex; flex-direction: column; gap: 4px; }
+.training-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 3px 0;
+}
+.training-label {
+  font-size: 11px; color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: 0.3px; font-weight: 500;
+}
+.training-value {
+  font-size: 12px; color: var(--text-secondary); font-weight: 500;
+}
+.training-value.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.training-value.positive { color: var(--hp-good); }
+.training-value.negative { color: var(--hp-low); }
+.training-dim { color: var(--text-muted); font-weight: 400; }
+.training-progress-wrap {
+  display: flex; align-items: center; gap: 8px; padding: 2px 0;
+}
+.training-progress-bar {
+  flex: 1; height: 4px; background: var(--bg-deep); border-radius: 2px; overflow: hidden;
+}
+.training-progress-fill {
+  height: 100%; background: var(--accent); border-radius: 2px;
+  transition: width 0.5s ease;
+}
+.training-progress-pct {
+  font-size: 11px; color: var(--text-muted); font-family: var(--mono);
+  font-variant-numeric: tabular-nums; width: 28px; text-align: right;
+}
+.training-chart { margin-top: 4px; }
+
+/* Rewards Panel */
+.rewards-panel .panel-badge.reward-pos { background: rgba(34,197,94,0.1); color: var(--hp-good); }
+.rewards-panel .panel-badge.reward-neg { background: rgba(239,68,68,0.1); color: var(--hp-low); }
+.rewards-grid {
+  display: flex; flex-direction: column; gap: 3px;
+  max-height: 180px; overflow-y: auto;
+}
+.rewards-grid::-webkit-scrollbar { width: 4px; }
+.rewards-grid::-webkit-scrollbar-track { background: transparent; }
+.rewards-grid::-webkit-scrollbar-thumb { background: var(--border-dim); border-radius: 2px; }
+.reward-row.zero { opacity: 0.35; }
+.reward-row {
+  display: flex; align-items: center; gap: 6px;
+}
+.reward-label {
+  font-size: 10px; color: var(--text-muted); width: 52px;
+  text-transform: uppercase; letter-spacing: 0.2px; font-weight: 500; flex-shrink: 0;
+}
+.reward-bar {
+  flex: 1; height: 4px; background: var(--bg-deep); border-radius: 2px; overflow: hidden;
+}
+.reward-bar-fill {
+  height: 100%; border-radius: 2px; transition: width 0.15s ease;
+}
+.reward-bar-fill.positive { background: var(--hp-good); }
+.reward-bar-fill.negative { background: var(--hp-low); }
+.reward-value {
+  font-size: 10px; font-family: var(--mono); font-variant-numeric: tabular-nums;
+  width: 48px; text-align: right; flex-shrink: 0;
+}
+.reward-value.positive { color: var(--hp-good); }
+.reward-value.negative { color: var(--hp-low); }
+
+/* ── Dashboard ── */
+.dashboard {
+  flex: 1; overflow-y: auto; padding: 32px 40px;
+}
+.dashboard-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 24px;
+}
+.dashboard-title {
+  font-size: 18px; font-weight: 600; color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+.dashboard-empty {
+  text-align: center; padding: 80px 0;
+  font-size: 14px; color: var(--text-muted);
+}
+
+/* Server grid */
+.server-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+.server-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-dim);
+  border-radius: 10px;
+  padding: 18px 20px;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.server-card.online {
+  border-color: var(--border-subtle);
+}
+.server-card.online:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-dim), 0 4px 20px rgba(0,0,0,0.2);
+}
+.server-card-header {
+  display: flex; align-items: center; justify-content: space-between;
+}
+.server-card-status {
+  display: flex; align-items: center; gap: 8px;
+}
+.server-card-name {
+  font-size: 14px; font-weight: 600; color: var(--text-primary);
+}
+.server-card-remove {
+  background: none; border: none; color: var(--text-muted);
+  font-size: 18px; cursor: pointer; padding: 0 4px;
+  line-height: 1; transition: color 0.15s;
+}
+.server-card-remove:hover { color: var(--hp-low); }
+.server-card-host {
+  font-size: 12px; color: var(--text-muted); font-family: var(--mono);
+}
+.server-card-title {
+  font-size: 13px; font-weight: 500; color: var(--text-secondary);
+}
+.server-card-stats {
+  display: flex; gap: 16px;
+}
+.server-card-stat {
+  display: flex; flex-direction: column; gap: 2px;
+}
+.server-card-stat-label {
+  font-size: 10px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.3px; font-weight: 500;
+}
+.server-card-stat-value {
+  font-size: 12px; color: var(--text-secondary);
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+}
+.server-card-open {
+  display: block; text-align: center;
+  padding: 8px; border-radius: 6px;
+  background: var(--accent-dim); border: 1px solid rgba(59, 130, 246, 0.2);
+  color: var(--accent-text); font-size: 12px; font-weight: 500;
+  text-decoration: none; transition: all 0.15s;
+}
+.server-card-open:hover {
+  background: rgba(59, 130, 246, 0.15);
+  border-color: var(--accent);
+}
+.server-card-offline {
+  font-size: 12px; color: var(--text-muted);
+  padding: 12px 0; text-align: center;
+}
+
+/* Add server */
+.add-server-btn {
+  font-family: var(--sans); font-size: 12px; font-weight: 500;
+  padding: 6px 14px; border-radius: 6px; cursor: pointer;
+  color: var(--text-secondary); background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle); transition: all 0.15s;
+}
+.add-server-btn:hover {
+  color: var(--accent-text); border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.add-server-form {
+  display: flex; gap: 8px; align-items: center;
+}
+.add-server-input {
+  font-family: var(--mono); font-size: 12px;
+  padding: 6px 10px; border-radius: 6px;
+  background: var(--bg-elevated); border: 1px solid var(--border-subtle);
+  color: var(--text-primary); outline: none;
+  width: 120px; transition: border-color 0.15s;
+}
+.add-server-input.host { width: 160px; }
+.add-server-input:focus { border-color: var(--accent); }
+.add-server-input::placeholder { color: var(--text-muted); }
+.add-server-submit {
+  font-family: var(--sans); font-size: 12px; font-weight: 500;
+  padding: 6px 14px; border-radius: 6px; cursor: pointer;
+  color: var(--bg-deep); background: var(--accent);
+  border: 1px solid var(--accent); transition: opacity 0.15s;
+}
+.add-server-submit:hover { opacity: 0.85; }
+.add-server-cancel {
+  font-family: var(--sans); font-size: 12px;
+  padding: 6px 10px; border-radius: 6px; cursor: pointer;
+  color: var(--text-muted); background: transparent;
+  border: 1px solid var(--border-dim); transition: all 0.15s;
+}
+.add-server-cancel:hover {
+  color: var(--text-secondary); border-color: var(--border-subtle);
+}
+
+/* Header back button */
+.header-back {
+  display: flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 6px;
+  background: transparent; border: 1px solid transparent;
+  color: var(--text-muted); cursor: pointer;
+  transition: all 0.15s; margin-right: 6px;
+}
+.header-back:hover {
+  color: var(--text-primary); background: var(--bg-elevated);
+  border-color: var(--border-dim);
+}
+
+/* Auto-discovered badge */
+.server-card-badge {
+  font-size: 10px; font-weight: 600; padding: 1px 6px;
+  border-radius: 4px; text-transform: uppercase; letter-spacing: 0.3px;
+}
+.server-card-badge.auto {
+  background: rgba(74, 222, 128, 0.1); color: var(--hp-good);
+  border: 1px solid rgba(74, 222, 128, 0.2);
+}
+
+.status-host {
+  font-size: 11px; color: var(--text-muted); font-family: var(--mono);
+  padding: 2px 8px; background: var(--bg-elevated);
+  border-radius: 4px; border: 1px solid var(--border-dim);
+}
+
+/* ── Demo viewer ── */
+.viewport {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  background: var(--bg-deep);
+}
+.demo-canvas-inner {
+  text-align: center; max-width: 400px; padding: 40px;
+}
+.demo-status {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  font-size: 12px; color: var(--text-muted); margin-bottom: 16px;
+}
+.demo-title {
+  font-size: 18px; font-weight: 600; color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.demo-subtitle {
+  font-size: 13px; color: var(--text-dim); margin-bottom: 20px;
+}
+.demo-stats {
+  display: flex; justify-content: center; gap: 24px; margin-bottom: 20px;
+}
+.demo-stat {
+  display: flex; flex-direction: column; gap: 4px;
+}
+.demo-stat-label {
+  font-size: 10px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.3px; font-weight: 500;
+}
+.demo-stat-value {
+  font-size: 14px; color: var(--text-secondary);
+  font-family: var(--mono); font-variant-numeric: tabular-nums;
+}
+.demo-hint {
+  font-size: 11px; color: var(--text-muted); opacity: 0.6;
+}
+.demo-hint code {
+  font-family: var(--mono); background: var(--bg-elevated);
+  padding: 1px 5px; border-radius: 3px;
+}
+
+/* ── Drone Racing HUD ── */
+.drone-hud {
+  position: absolute; bottom: 20px; left: 20px; z-index: 5;
+  background: rgba(9, 9, 11, 0.85); backdrop-filter: blur(8px);
+  border: 1px solid var(--border-dim); border-radius: 8px;
+  padding: 12px 16px; min-width: 160px;
+  font-family: var(--mono); font-size: 12px;
+  pointer-events: none;
+}
+.drone-hud-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 2px 0; gap: 12px;
+}
+.drone-hud-label {
+  font-size: 10px; color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: 0.4px; font-weight: 600;
+}
+.drone-hud-value {
+  font-size: 13px; color: var(--text-secondary);
+  font-variant-numeric: tabular-nums; font-weight: 500;
+}
+.drone-hud-motors {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 0 2px;
+}
+.drone-hud-motor-bars {
+  display: flex; gap: 3px; align-items: flex-end; height: 20px;
+}
+.drone-motor-bar-track {
+  width: 8px; height: 20px; background: var(--bg-deep);
+  border-radius: 2px; overflow: hidden; position: relative;
+}
+.drone-motor-bar-fill {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: var(--accent-text); border-radius: 2px;
+  transition: height 0.08s linear;
+  height: 0%;
+}
+.drone-hud-dots {
+  display: flex; gap: 4px; padding-top: 8px; justify-content: center;
+}
+.drone-gate-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--border-subtle); transition: all 0.2s;
+}
+.drone-gate-dot.passed { background: var(--hp-good); }
+.drone-gate-dot.active {
+  background: var(--accent-text);
+  box-shadow: 0 0 6px var(--accent);
+}

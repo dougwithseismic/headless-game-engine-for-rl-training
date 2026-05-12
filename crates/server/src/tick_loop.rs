@@ -6,6 +6,7 @@ use tracing::{info, warn};
 
 use ghostlobby_engine::config::GameConfig;
 use ghostlobby_engine::ecs::resources::{ObstacleLayout, SpawnPointPool};
+use ghostlobby_engine::scenarios::cs_lite::CsLiteScenario;
 use ghostlobby_engine::scenarios::tactical_deathmatch::TacticalDeathmatchScenario;
 use ghostlobby_engine::tick::{TickMode, TickRunner};
 use ghostlobby_telemetry::ws_sink::WsSink;
@@ -151,6 +152,9 @@ fn build_runner(config: &GameConfig) -> TickRunner {
             .with_scenario(TacticalDeathmatchScenario)
             .build()
     } else {
-        TickRunner::new(config.clone())
+        info!("using cs-lite scenario");
+        TickRunner::builder(config.clone())
+            .with_scenario(CsLiteScenario::default())
+            .build()
     }
 }

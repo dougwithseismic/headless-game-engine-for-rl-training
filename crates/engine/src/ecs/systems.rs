@@ -5,7 +5,7 @@ use rand::Rng;
 use crate::action_space::{ActionMaskBuffer, ActionSpaceDef, RawActionBuffer};
 use crate::ecs::components::*;
 use crate::ecs::resources::*;
-use crate::observation::{RewardBuffer, ShotEventBuffer};
+use crate::observation::{RewardBreakdownBuffer, RewardBuffer, ShotEventBuffer};
 use crate::physics::PhysicsState;
 use crate::telemetry::{EntityState, TelemetryEvent};
 
@@ -13,11 +13,13 @@ pub fn clear_buffers(
     mut raw_buffer: ResMut<RawActionBuffer>,
     mut mask_buffer: ResMut<ActionMaskBuffer>,
     mut reward_buffer: ResMut<RewardBuffer>,
+    mut reward_breakdown: ResMut<RewardBreakdownBuffer>,
     mut shot_buffer: ResMut<ShotEventBuffer>,
 ) {
     raw_buffer.clear();
     mask_buffer.clear();
     reward_buffer.clear();
+    reward_breakdown.clear();
     shot_buffer.clear();
 }
 

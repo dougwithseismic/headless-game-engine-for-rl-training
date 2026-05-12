@@ -1,235 +1,211 @@
 # GhostLobby
 
-Headless game engine for RL agent training. Define a game scenario, get a Gymnasium-compatible environment running at 230K+ ticks/sec.
+A headless game engine for training FPS agents using reinforcement learning. Built in Rust for speed (19K+ TPS), with Python bindings for PPO training via Stable Baselines 3.
 
-Built in Rust (Bevy ECS + Rapier2D physics), with Python bindings via PyO3. Ships with FPS deathmatch, MOBA lane, and racing scenarios. Add your own by implementing one trait.
+The methodology combines behavioral cloning from a scripted AI teacher, curriculum training against progressively harder opponents, and automated reward function search inspired by NVIDIA's Eureka framework.
+
+## What This Does
+
+The engine simulates a 1v1 tactical shooter (CS-Lite) with 3D physics, A* navigation, cover mechanics, and raycasted combat. An RL agent learns to aim, move, shoot, and use cover by playing thousands of matches per minute against scripted opponents.
+
+**Current results (Phase 1, 30M steps):**
+- 28% shot accuracy (from 0% at step 0)
+- 12+ kills per match against a basic opponent
+- Continuous aim steering (no discrete bin oscillation)
+- Full behavioral instrumentation tracking every metric in TensorBoard
+
+## Training Methodology
+
+### The Pipeline
+
+```
+Scripted AI demos → Behavioral Cloning → PPO Fine-tuning → Curriculum Progression
+```
+
+1. **Scripted AI** plays the game. We record every (observation, action) pair.
+2. **Behavioral Cloning (BC)** trains a neural network to imitate the scripted AI via supervised learning. The agent starts knowing how to aim and shoot.
+3. **PPO** refines the BC policy through reinforcement learning, improving beyond the teacher.
+4. **Curriculum** increases opponent difficulty as the agent improves. Each phase has its own reward configuration.
+
+### Curriculum Phases
+
+| Phase | Opponent | What the agent learns | Gate to next phase |
+|-------|----------|----------------------|-------------------|
+| 1 | Dummy AI (slow aim, random movement) | Aim, shoot, basic combat | >80% win rate |
+| 2 | Scripted AI (80% accuracy, flanking) | Survive against competent play | >50% win rate |
+| 3 | Self-play (copies of itself) | Adapt, counter-strategy | Elo plateau |
+
+### Reward Search (Eureka-style)
+
+Instead of manually tuning reward functions, we test multiple configurations in parallel and compare behavioral metrics. Each candidate runs for 500K steps (~3 minutes), and the results are ranked automatically.
+
+```bash
+python scripts/reward_search.py \
+  --base-config configs/cs_lite/1v1_tactical.json \
+  --reward-dir configs/cs_lite/rewards_phase2/ \
+  --scenario cs_lite \
+  --steps 500000 \
+  --bc-model data/bc_models/model.zip
+```
+
+Output:
+```
+Candidate          Accuracy  Kills/ep  Deaths/ep  Reward
+trade               26.65%      1.9      13.5     +50.3  <- best accuracy
+mild_penalty         25.36%      2.5      13.5     +28.1  <- best kills
+aggressive           23.98%      1.8      13.5     +63.9
+positive_only        22.55%      1.3      13.3     +18.5
+```
+
+Reward values are configured in JSON — no Rust recompilation needed:
+```json
+{
+  "reward_kill": 5.0,
+  "reward_death": -0.5,
+  "reward_damage_dealt": 2.0,
+  "reward_damage_taken": -0.1,
+  "reward_round_win": 5.0,
+  "reward_round_loss": -0.5,
+  "reward_near_miss": 0.05
+}
+```
+
+### Training Instrumentation
+
+Every training run emits behavioral metrics to TensorBoard alongside standard PPO metrics. This catches degenerate behavior (camping, spinning, not shooting) within minutes instead of after hours of wasted compute.
+
+**Behavioral metrics (`behavior/`):**
+- `accuracy` — shot hit rate. 0% = can't aim. First thing to check.
+- `kills_per_ep`, `deaths_per_ep` — is the agent fighting?
+- `shoot_rate` — 0% = not shooting, >80% = spray-and-pray
+- `damage_dealt_per_ep`, `damage_taken_per_ep` — combat intensity
+
+**Reward components (`reward_components/`):**
+- Per-category breakdown: `kill`, `death`, `damage_dealt`, `damage_taken`, `near_miss`, `round_win`, `round_loss`
+- Shows exactly where reward comes from. If 100% comes from one source, something is wrong.
 
 ## Quick Start
 
 ```bash
 # Build
 cargo build
-
-# Run tests (61 tests)
 cargo test -p ghostlobby-engine
 
-# Benchmark (1M ticks)
-cargo run --example benchmark --release -p ghostlobby-engine
-
-# Start server with web viewer
-cargo run --bin ghostlobby-server
-# Open http://localhost:3000
-```
-
-### Python / RL Training
-
-```bash
-# Set up Python environment
+# Python setup
 python3 -m venv .venv && source .venv/bin/activate
-pip install maturin numpy gymnasium stable-baselines3
-
-# Build the Python module
+pip install maturin numpy gymnasium stable-baselines3 sb3-contrib torch
 cd crates/py && maturin develop --release && cd ../..
 
-# Train an agent
-python python/train.py --config configs/1v1_deathmatch.json --timesteps 500000
+# Collect demos from scripted AI
+cd python
+python scripts/collect_demos.py \
+  --scenario cs_lite_dummy \
+  --config configs/cs_lite/1v1_tactical.json \
+  --episodes 500
 
-# Evaluate a trained model
-python python/evaluate.py --model runs/<your_run>/final_model.zip --episodes 5
+# BC pre-train
+python scripts/train.py --scenario cs_lite_dummy --mode bc \
+  --demos data/demos/cs_lite_dummy.npz \
+  --config configs/cs_lite/1v1_tactical.json
 
-# View training dashboard
+# PPO training
+python scripts/train.py --scenario cs_lite_dummy \
+  --config configs/cs_lite/1v1_tactical.json \
+  --timesteps 3000000 --n-envs 32 \
+  --resume data/bc_models/cs_lite_dummy.zip \
+  --kl-anchor data/bc_models/cs_lite_dummy_ref.pt
+
+# Monitor
 tensorboard --logdir runs/
-```
 
-### Python API
+# Reward search
+python scripts/reward_search.py \
+  --base-config configs/cs_lite/1v1_tactical.json \
+  --reward-dir configs/cs_lite/rewards_phase2/ \
+  --scenario cs_lite \
+  --steps 500000 \
+  --bc-model runs/best_model.zip
 
-```python
-import ghostlobby
+# Watch model play (web viewer must be running)
+python scripts/watch_model.py \
+  --config configs/cs_lite/1v1_tactical.json \
+  --model runs/best_model.zip \
+  --port 3000
 
-env = ghostlobby.GhostLobbyEnv("configs/oval_race.json", scenario="racing")
-
-obs, info = env.reset()
-# obs = {0: {"self_features": [...], "track_waypoints": [...]}, 1: {...}, ...}
-
-actions = {i: [0.0, 1.0, 0.0] for i in env.agents()}
-obs, rewards, terminated, truncated, infos = env.step(actions)
-
-env.action_space()        # head definitions + total_size
-env.observation_space()   # feature names + shapes
-env.agents()              # [0, 1, 2, 3]
+# Web viewer
+cd web-app && pnpm dev    # http://localhost:5173
 ```
 
 ## Architecture
 
 ```
 crates/
-  engine/      Core simulation -- Bevy ECS, Rapier2D physics, scenarios, observations, rewards
-  server/      Axum HTTP/WebSocket server with live web viewer
-  telemetry/   Event sinks (WebSocket broadcast, JSONL file, in-memory buffer)
-  py/          PyO3 Python bindings -- GhostLobbyEnv
+  engine/       Bevy ECS simulation, Rapier 3D physics, scenarios
+  server/       Axum HTTP/WebSocket server for web viewer
+  telemetry/    Event sinks (WebSocket, JSONL, in-memory)
+  py/           PyO3 bindings (GhostLobbyEnv)
 
-python/        Gymnasium wrapper, SB3 training script, evaluation script
-configs/       Game configuration JSONs
-web/           Canvas 2D top-down viewer (connects via WebSocket)
+python/
+  glgym/        Gymnasium wrappers (CsLiteGym, TacticalGym)
+  training/     BC collector, PPO trainer, behavioral callbacks
+  scripts/      CLI: train.py, collect_demos.py, reward_search.py, watch_model.py
+
+configs/
+  cs_lite/      Game configs + reward search variants
+    rewards/         Phase 1 reward configs
+    rewards_phase2/  Phase 2 reward configs
 ```
 
-### Engine Phases
-
-Each tick runs through ordered system sets. Core systems are always present; scenarios register their own into the appropriate phase.
+### Engine Tick Schedule
 
 ```
-ClearBuffers -> AiDecisions -> PrePhysics -> PhysicsStep -> PostPhysics -> GameLogic -> StateTransitions -> Telemetry
+ClearBuffers → AiDecisions → PrePhysics → PhysicsStep → PostPhysics → GameLogic → Telemetry
 ```
 
-**Core systems** (engine provides): clear buffers, run scripted AI, sync actions to Rapier, step physics, sync positions back to ECS, emit telemetry snapshots.
+### Action Space (4 heads)
 
-**Scenario systems** (scenario registers): combat, death/respawn, vehicle physics, checkpoint tracking, creep spawning -- whatever the game needs.
+| Head | Type | Range | Purpose |
+|------|------|-------|---------|
+| `move_target` | Discrete(12) | 0-11 | 8 compass + stay + cover + advance + retreat |
+| `yaw_delta` | Continuous | [-1, 1] | Fraction of max turn rate (smooth steering) |
+| `pitch_delta` | Continuous | [-1, 1] | Fraction of max pitch rate |
+| `shoot` | Discrete(2) | 0-1 | Fire weapon |
 
-### Scenario Trait
+Yaw and pitch use **continuous relative steering** — the network outputs a fraction of the max turn rate, enabling smooth aim tracking without discrete bin oscillation.
 
-A scenario defines a complete game -- what entities exist, what actions are available, what the agent observes, and how rewards work.
+### Observation Space (229 dims for 1v1)
 
-```rust
-pub trait Scenario: Send + Sync {
-    fn name(&self) -> &str;
-    fn action_space(&self, config: &GameConfig) -> ActionSpaceDef;
-    fn observation_space(&self, config: &GameConfig) -> ObservationSpaceDef;
-    fn setup(&self, world: &mut World, config: &GameConfig, physics: &mut PhysicsState);
-    fn register_systems(&self, schedule: &mut Schedule);
-    fn observe(&self, world: &World, agent: Entity, writer: &mut ObsWriter);
-    fn reward(&self, world: &World, agent: Entity) -> f32;
-    fn is_done(&self, world: &World, agent: Entity) -> bool;
-}
-```
+Self state (12), weapon state (20), teammate state, enemy state (10), round info (9), bomb state (8), A* candidate positions (60), 3D raycasts (90), audio (6), action mask (14).
 
-### Action Spaces
+Audio includes gunshot bearing + freshness flag and footstep bearing + loudness from enemy movement, giving temporal signals for LSTM-based architectures.
 
-Actions are flat `Vec<f32>` arrays with multi-head definitions. Each scenario defines its own layout:
+### Scripted AI Variants
 
-| Scenario | Heads | Total |
-|----------|-------|-------|
-| FPS Deathmatch | `move_dir(2)`, `look_angle(1)`, `shoot(discrete 2)` | 4 |
-| Racing | `steer(1)`, `throttle(1)`, `brake(discrete 2)` | 3 |
-| MOBA Lane | `move_dir(2)`, `look_angle(1)`, `shoot(discrete 2)` | 4 |
+- **Smart AI** (`cs_lite`) — 80% accuracy, continuous aim tracking, flanking, peeking. The Phase 2+ opponent and the BC demo teacher.
+- **Dummy AI** (`cs_lite_dummy`) — 40% turn speed, wide shoot threshold, random movement. The Phase 1 training opponent.
 
-RL agents send flat arrays. Scripted bots produce the same format. The engine doesn't care who's driving.
+## Key Learnings
 
-## Scenarios
+Things that worked:
+- **Positive-only rewards for Phase 1** — no death penalty means PPO can't learn to avoid combat
+- **Continuous aim** instead of discrete bins — eliminates overshoot oscillation
+- **BC warm-start with KL anchor** — agent starts competent, PPO improves without destroying aim
+- **Behavioral instrumentation** — catches broken training in minutes, not hours
+- **Automated reward search** — 8 configs in 22 minutes vs days of manual tuning
 
-### FPS Deathmatch
+Things that didn't work:
+- **Discrete yaw/pitch bins** — perpetual oscillation, agent spins
+- **Heavy death penalties** — PPO learns "don't fight" instead of "fight better"
+- **Per-tick shaping rewards** — agent camps near cover collecting free reward
+- **LSTM without BC warm-start** — random LSTM weights can't discover aim from scratch
+- **Self-play too early** — two bad agents reinforcing each other's bad habits
 
-Team-based arena combat with hitscan weapons. Agents move, aim, and shoot. Rapier handles collision with walls and obstacles. Raycast combat with line-of-sight occlusion.
+## Future Direction
 
-```bash
-cargo run --bin ghostlobby-server -- configs/arena_deathmatch.json    # 5v5
-cargo run --bin ghostlobby-server -- configs/1v1_deathmatch.json      # 1v1
-```
-
-### Racing
-
-Oval track with vehicle physics (steering, throttle, braking). 4 checkpoints around the track, 3 laps to win. Cars collide with walls and each other via Rapier.
-
-```bash
-cargo run --bin ghostlobby-server -- configs/oval_race.json
-```
-
-### MOBA Lane
-
-1v1 in a narrow lane with AI-controlled creep waves. Creeps spawn periodically and march toward the enemy base.
-
-```bash
-cargo run --bin ghostlobby-server -- configs/lane_lasthit.json
-```
-
-## Training
-
-The training pipeline uses Stable Baselines3 with PPO. Each run creates a self-contained experiment directory.
-
-```bash
-python python/train.py \
-  --config configs/1v1_deathmatch.json \
-  --scenario fps \
-  --timesteps 1000000 \
-  --lr 3e-4 \
-  --frame-skip 4 \
-  --name my_experiment
-```
-
-This creates:
-
-```
-runs/my_experiment_2026-05-05_14-30/
-  experiment.json          Full config snapshot for reproducibility
-  tensorboard/             TensorBoard event logs
-  checkpoints/
-    model_50000_steps.zip  Periodic checkpoints
-    model_100000_steps.zip
-  best_model/              Best model from evaluation callbacks
-  eval_logs/               Evaluation results
-  final_model.zip          Final trained model
-```
-
-Resume from a checkpoint:
-
-```bash
-python python/train.py \
-  --resume runs/my_experiment_2026-05-05_14-30/checkpoints/model_50000_steps.zip \
-  --timesteps 500000
-```
-
-Compare experiments in TensorBoard:
-
-```bash
-tensorboard --logdir runs/
-# Open http://localhost:6006
-```
-
-Evaluate a trained model:
-
-```bash
-python python/evaluate.py --model runs/my_experiment_2026-05-05_14-30/final_model.zip --episodes 10
-```
-
-## Server API
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/health` | GET | Liveness check |
-| `/api/match` | GET | Current tick, title, status |
-| `/api/match/reset` | POST | Reset simulation |
-| `/api/config` | GET | Full game config as JSON |
-| `/ws/observe` | WS | Read-only telemetry stream |
-| `/ws/play` | WS | Send actions: `{"source_id": 0, "actions": [0.5, 0.3, 1.2, 0.0]}` |
-
-## Adding a New Scenario
-
-1. Create `crates/engine/src/scenarios/your_game.rs`
-2. Define game-specific components and resources
-3. Implement the `Scenario` trait (8 methods)
-4. Register your systems into `EnginePhase` sets
-5. Add `pub mod your_game` to `crates/engine/src/scenarios/mod.rs`
-6. Add a config JSON in `configs/`
-7. Add scenario detection in `crates/server/src/tick_loop.rs` and `crates/py/src/lib.rs`
-
-No changes to the core engine required. The scenario owns its action space, observation space, game logic, rewards, and win conditions.
-
-## Performance
-
-Benchmark on Apple M-series (1M ticks, 10 agents, arena with obstacles):
-
-```
-Ticks/sec:   230,000+
-us/tick:     ~4.3
-```
-
-Training throughput with SB3 PPO (includes Python + PyTorch overhead):
-
-```
-Steps/sec:   ~4,000 (single env)
-```
+See [docs/eureka-direction.md](docs/eureka-direction.md) for the full plan to automate reward function design using LLM-guided search, following NVIDIA Eureka's framework applied to FPS game agents.
 
 ## Dependencies
 
-**Rust**: bevy_ecs 0.16, rapier2d 0.22, glam 0.29, axum 0.8, tokio, serde, pyo3 0.25
+**Rust:** bevy_ecs 0.16, rapier2d 0.22, rapier3d 0.22, glam 0.29, axum 0.8, tokio, serde, pyo3 0.25
 
-**Python**: gymnasium, stable-baselines3, numpy, maturin (build only)
+**Python:** gymnasium, stable-baselines3, sb3-contrib, numpy, torch, maturin

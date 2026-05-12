@@ -19,4 +19,16 @@ export type TelemetryEvent =
   | { type: 'Spawn'; tick: number; entity: number; position: Vec2; team: number }
   | { type: 'TickComplete'; tick: number; entity_count: number }
   | { type: 'RoundStart'; tick: number; obstacles: Array<{ x: number; y: number; width: number; height: number }>; spawn_points: Vec2[] }
-  | { type: 'TacticalState'; tick: number; entity: number; move_target: number; candidates: [number, number][]; candidate_los: boolean[]; path: [number, number][]; aim_angle: number; shooting: boolean; ray_distances: number[] };
+  | { type: 'TacticalState'; tick: number; entity: number; move_target: number; candidates: [number, number][]; candidate_los: boolean[]; path: [number, number][]; aim_angle: number; shooting: boolean; ray_distances: number[]; rewards?: RewardBreakdown }
+  | { type: 'Arena3DState'; tick: number; entity: number; position: [number, number, number]; velocity: [number, number, number]; yaw: number; pitch: number; health: number; max_health: number; team: number; is_dead: boolean; active_weapon: number; shooting: boolean; move_direction: number; ray_distances: number[]; ray_hit_types: number[] }
+  | { type: 'CsLiteRoundState'; tick: number; phase: string; round_number: number; t_score: number; ct_score: number; phase_timer: number; t_alive: number; ct_alive: number };
+
+export interface RewardBreakdown {
+  proximity: number;
+  aim: number;
+  time_penalty: number;
+  cover_bonus: number;
+  idle_penalty: number;
+  los_gain: number;
+  combat: number;
+}

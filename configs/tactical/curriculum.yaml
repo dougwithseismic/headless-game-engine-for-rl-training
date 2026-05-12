@@ -1,0 +1,34 @@
+name: tactical_full
+scenario: tactical
+
+phases:
+  - name: basic
+    config: configs/tactical/phase1_open.json
+    max_timesteps: 3000000
+    advance_threshold: 10.0
+    advance_patience: 3
+    bc_warmstart: true
+    entropy_start: 0.01
+    entropy_end: 0.002
+    n_envs: 32
+    lr: 0.0003
+    phase_mask: 1
+
+  - name: obstacles
+    config: configs/tactical/phase2_obstacles.json
+    max_timesteps: 5000000
+    advance_threshold: 15.0
+    advance_patience: 3
+    resume_from: previous
+    n_envs: 32
+    lr: 0.0002
+    phase_mask: 2
+
+  - name: complex
+    config: configs/tactical/phase3_complex.json
+    max_timesteps: 10000000
+    resume_from: previous
+    self_play: true
+    n_envs: 32
+    lr: 0.0001
+    phase_mask: 3

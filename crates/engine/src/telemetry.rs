@@ -65,5 +65,45 @@ pub enum TelemetryEvent {
         aim_angle: f32,
         shooting: bool,
         ray_distances: Vec<f32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        rewards: Option<RewardBreakdown>,
     },
+    Arena3DState {
+        tick: u64,
+        entity: u64,
+        position: [f32; 3],
+        velocity: [f32; 3],
+        yaw: f32,
+        pitch: f32,
+        health: f32,
+        max_health: f32,
+        team: u8,
+        is_dead: bool,
+        active_weapon: u8,
+        shooting: bool,
+        move_direction: u8,
+        ray_distances: Vec<f32>,
+        ray_hit_types: Vec<f32>,
+    },
+    CsLiteRoundState {
+        tick: u64,
+        phase: String,
+        round_number: u32,
+        t_score: u32,
+        ct_score: u32,
+        phase_timer: f32,
+        t_alive: u32,
+        ct_alive: u32,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RewardBreakdown {
+    pub proximity: f32,
+    pub aim: f32,
+    pub time_penalty: f32,
+    pub cover_bonus: f32,
+    pub idle_penalty: f32,
+    pub los_gain: f32,
+    pub combat: f32,
 }

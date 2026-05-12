@@ -1,0 +1,64 @@
+{
+  "title": "cs_lite 5v5 Elimination",
+  "tick_rate": 64,
+  "arena": { "width": 80.0, "height": 60.0 },
+  "movement": { "max_speed": 5.5, "acceleration": 100.0, "friction": 50.0 },
+  "combat": { "default_weapon": { "damage": 25.0, "fire_rate": 0.3, "range": 50.0 } },
+  "spawning": { "respawn_delay": 999.0, "round_time_limit": 20.0 },
+  "teams": { "count": 2, "players_per_team": 5 },
+  "obstacles": [
+    { "x": 5.0,  "y": 10.0, "width": 28.0, "height": 1.5, "_note": "mid divider left" },
+    { "x": 47.0, "y": 10.0, "width": 28.0, "height": 1.5, "_note": "mid divider right" },
+
+    { "x": 5.0,  "y": 10.0, "width": 1.5,  "height": 15.0, "_note": "left corridor outer" },
+    { "x": 15.0, "y": 12.0, "width": 1.5,  "height": 10.0, "_note": "left corridor inner" },
+
+    { "x": 73.5, "y": 10.0, "width": 1.5,  "height": 15.0, "_note": "right corridor outer" },
+    { "x": 63.5, "y": 12.0, "width": 1.5,  "height": 10.0, "_note": "right corridor inner" },
+
+    { "x": 30.0, "y": 17.0, "width": 2.5,  "height": 2.5, "_note": "mid cover L" },
+    { "x": 47.5, "y": 17.0, "width": 2.5,  "height": 2.5, "_note": "mid cover R" },
+    { "x": 38.0, "y": 22.0, "width": 4.0,  "height": 2.0, "_note": "mid box center" },
+    { "x": 25.0, "y": 25.0, "width": 2.0,  "height": 2.0, "_note": "mid pillar L" },
+    { "x": 53.0, "y": 25.0, "width": 2.0,  "height": 2.0, "_note": "mid pillar R" },
+
+    { "x": 5.0,  "y": 35.0, "width": 20.0, "height": 1.5, "_note": "A entry wall" },
+    { "x": 55.0, "y": 35.0, "width": 20.0, "height": 1.5, "_note": "B entry wall" },
+
+    { "x": 12.0, "y": 40.0, "width": 3.0,  "height": 2.5, "_note": "A site box" },
+    { "x": 22.0, "y": 42.0, "width": 2.0,  "height": 2.0, "_note": "A site pillar" },
+
+    { "x": 65.0, "y": 40.0, "width": 3.0,  "height": 2.5, "_note": "B site box" },
+    { "x": 56.0, "y": 42.0, "width": 2.0,  "height": 2.0, "_note": "B site pillar" },
+
+    { "x": 27.0, "y": 35.0, "width": 1.5,  "height": 14.0, "_note": "A-mid divider" },
+    { "x": 51.5, "y": 35.0, "width": 1.5,  "height": 14.0, "_note": "B-mid divider" },
+
+    { "x": 5.0,  "y": 49.0, "width": 30.0, "height": 1.5, "_note": "CT back wall L" },
+    { "x": 45.0, "y": 49.0, "width": 30.0, "height": 1.5, "_note": "CT back wall R" }
+  ],
+  "extra": {
+    "scenario": "cs_lite",
+    "arena_width": 80.0,
+    "arena_depth": 60.0,
+    "arena_height_3d": 10.0,
+    "max_rounds": 24,
+    "round_time_limit": 20.0,
+    "buy_time": 1.0,
+    "end_time": 1.0,
+    "ray_h_count": 9,
+    "ray_v_count": 5,
+    "ray_h_fov": 2.094,
+    "ray_v_fov": 1.396,
+    "ray_max_range": 60.0,
+    "hitbox_radius": 2.5,
+    "reward_kill": 3.0,
+    "reward_death": 0.0,
+    "reward_damage_dealt": 1.0,
+    "reward_damage_taken": 0.0,
+    "reward_round_win": 5.0,
+    "reward_round_loss": 0.0,
+    "reward_near_miss": 0.03,
+    "reward_friendly_fire": -2.0
+  }
+}

@@ -101,6 +101,29 @@ impl RewardBuffer {
     }
 }
 
+#[derive(Resource, Debug, Clone, Default)]
+pub struct RewardBreakdownBuffer {
+    pub components: HashMap<Entity, HashMap<String, f32>>,
+}
+
+impl RewardBreakdownBuffer {
+    pub fn add(&mut self, entity: Entity, category: &str, amount: f32) {
+        *self.components
+            .entry(entity)
+            .or_default()
+            .entry(category.to_string())
+            .or_default() += amount;
+    }
+
+    pub fn get(&self, entity: Entity) -> Option<&HashMap<String, f32>> {
+        self.components.get(&entity)
+    }
+
+    pub fn clear(&mut self) {
+        self.components.clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

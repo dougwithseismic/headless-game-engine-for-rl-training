@@ -1,0 +1,27 @@
+{
+  "title": "tactical-complex",
+  "tick_rate": 64,
+  "arena": { "width": 900, "height": 900 },
+  "movement": { "max_speed": 200, "acceleration": 1000, "friction": 800, "turn_rate": 12.0 },
+  "combat": { "default_weapon": { "damage": 34, "fire_rate": 0.3, "range": 500 } },
+  "spawning": { "respawn_delay": 0.5, "round_time_limit": 20.0 },
+  "teams": { "count": 2, "players_per_team": 1 },
+  "obstacles": [
+    { "x": 200, "y": 200, "width": 60, "height": 120 },
+    { "x": 640, "y": 580, "width": 60, "height": 120 },
+    { "x": 400, "y": 400, "width": 100, "height": 20 },
+    { "x": 400, "y": 480, "width": 100, "height": 20 },
+    { "x": 380, "y": 400, "width": 20, "height": 100 },
+    { "x": 120, "y": 500, "width": 15, "height": 150 },
+    { "x": 760, "y": 250, "width": 15, "height": 150 },
+    { "x": 300, "y": 100, "width": 80, "height": 20 },
+    { "x": 520, "y": 780, "width": 80, "height": 20 }
+  ],
+  "extra": {
+    "scenario": "tactical",
+    "reward_mode": "cover",
+    "candidate_distance": 50.0,
+    "sensor_rays": 64,
+    "sensor_range": 600.0
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "title": "tactical-open",
+  "tick_rate": 64,
+  "arena": { "width": 600, "height": 600 },
+  "movement": { "max_speed": 200, "acceleration": 1000, "friction": 800, "turn_rate": 12.0 },
+  "combat": { "default_weapon": { "damage": 34, "fire_rate": 0.3, "range": 400 } },
+  "spawning": { "respawn_delay": 0.5, "round_time_limit": 15.0 },
+  "teams": { "count": 2, "players_per_team": 1 },
+  "obstacles": [],
+  "extra": {
+    "scenario": "tactical",
+    "reward_mode": "base",
+    "candidate_distance": 45.0,
+    "sensor_rays": 64,
+    "sensor_range": 500.0
+  }
+}
