@@ -1,11 +1,11 @@
 """
 Tactical Gymnasium wrapper for GhostLobby top-down tactical scenarios.
 
-Action heads:
-  [0] move_target: discrete 0-11 (12 cardinal + diagonal directions)
-  [1] aim_delta:   continuous [-1,1] (pass-through)
-  [2] shoot:       binary (threshold at 0)
-  [3] weapon_select: binary (threshold at 0)
+Action heads (MultiDiscrete, populated from engine action_space()):
+  [0] move_target: Discrete(12)
+  [1] aim_delta:   Discrete(N)
+  [2] shoot:       Discrete(2)
+  [3] weapon_select: Discrete(2)
 
 Supports opponent for self-play and curriculum phases.
 """
@@ -16,11 +16,10 @@ from glgym.gym_base import BaseGhostLobbyGym
 
 
 class TacticalGym(BaseGhostLobbyGym):
-    """Top-down tactical scenario with 12-direction discrete movement.
+    """Top-down tactical scenario with MultiDiscrete action space.
 
-    Uses the same action remapping as SelfPlayGym: move_target is
-    discretised from continuous [-1,1] to [0,11], aim passes through,
-    shoot and weapon_select are thresholded to binary.
+    Action heads are populated from the engine's action_space() definition.
+    Integer indices are passed directly to the engine.
 
     Curriculum phases:
       Phase 1: Scripted movement (random compass direction held 8-20 steps).
@@ -58,20 +57,6 @@ class TacticalGym(BaseGhostLobbyGym):
         """Randomise sides for self-play on each reset."""
         self.agent_id = random.randint(0, 1)
         self.opp_id = 1 - self.agent_id
-
-    def _remap_actions(self, action_list: list[float]) -> list[float]:
-        """Remap continuous [-1,1] to tactical engine format.
-
-          [0] move_target:    [-1,1] -> [0,11] (12 discrete directions)
-          [1] aim_delta:      [-1,1] -> [-1,1] (pass-through)
-          [2] shoot:          [-1,1] -> 0 or 1
-          [3] weapon_select:  [-1,1] -> 0 or 1
-        """
-        if len(action_list) >= 4:
-            action_list[0] = (action_list[0] + 1.0) * 5.5   # [-1,1] -> [0,11]
-            action_list[2] = 1.0 if action_list[2] > 0.0 else 0.0
-            action_list[3] = 1.0 if action_list[3] > 0.0 else 0.0
-        return action_list
 
     def _apply_phase_mask(self, action_list: list[float]) -> list[float]:
         """Lock action heads based on curriculum phase.

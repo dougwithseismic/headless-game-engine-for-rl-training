@@ -329,6 +329,9 @@ class CurriculumRunner:
             patience=phase_config.get("advance_patience", 15),
             run_dir=phase_dir,
             frame_skip=phase_config.get("frame_skip", 4),
+            memory=phase_config.get("memory", "none"),
+            memory_hidden_size=phase_config.get("memory_hidden_size", 256),
+            memory_sequence_length=phase_config.get("memory_sequence_length"),
         )
 
         final_model = trainer.train()

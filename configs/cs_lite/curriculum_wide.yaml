@@ -1,0 +1,42 @@
+name: cs_lite_wide
+scenario: cs_lite_dummy
+
+phases:
+  - name: phase1_combat
+    config: configs/cs_lite/1v1_wide.json
+    max_timesteps: 5_000_000
+    advance_threshold: 50.0
+    advance_patience: 10
+    n_envs: 16
+    lr: 0.0003
+    ent_coef: 0.01
+    frame_skip: 4
+    bc_warmstart: true
+    kl_anchor: true
+    kl_beta_start: 0.3
+    kl_beta_end: 0.0
+    kl_anneal_steps: 2_000_000
+    entropy_start: 0.01
+    entropy_end: 0.002
+
+  - name: phase2_smart_opponent
+    config: configs/cs_lite/1v1_wide.json
+    scenario: cs_lite
+    max_timesteps: 10_000_000
+    advance_threshold: 30.0
+    advance_patience: 15
+    n_envs: 16
+    lr: 0.0002
+    frame_skip: 4
+    resume_from: previous
+
+  - name: phase3_selfplay
+    config: configs/cs_lite/1v1_wide.json
+    max_timesteps: 10_000_000
+    n_envs: 16
+    lr: 0.0001
+    frame_skip: 4
+    resume_from: previous
+    self_play: true
+    swap_interval: 500_000
+    scripted_warmup: 0

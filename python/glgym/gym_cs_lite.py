@@ -1,17 +1,17 @@
 """
 CS-Lite Gymnasium wrapper for GhostLobby 5v5 tactical shooter.
 
-Action heads (2 values):
-  [0] move_target:   [-1,1] -> [0,11]  (12 candidates)
-  [1] shoot:         [-1,1] -> 0 or 1
+Action heads (MultiDiscrete):
+  [0] move_target:   Discrete(12)
+  [1] shoot:         Discrete(2)
+  [2] reload:        Discrete(2)
+  [3] use_action:    Discrete(3)
 
 Supports shared-policy multi-agent (one network, 5 instances per team),
 self-play (T vs CT), and curriculum phases.
 """
 
 import random
-
-import numpy as np
 
 from glgym.gym_base import BaseGhostLobbyGym
 
@@ -72,25 +72,14 @@ class CsLiteGym(BaseGhostLobbyGym):
         self.agent_id = team * ppt
         self.opp_id = (1 - team) * ppt
 
-    def _remap_actions(self, action_list: list[float]) -> list[float]:
-        """Remap continuous [-1,1] to CS-Lite engine format.
-
-          [0] move_target:   [-1,1] -> [0,11]  (12 candidates)
-          [1] shoot:         [-1,1] -> 0 or 1
-        """
-        if len(action_list) >= 2:
-            action_list[0] = round((action_list[0] + 1.0) * 5.5)    # [0,11] move
-            action_list[1] = 1.0 if action_list[1] > -0.3 else 0.0   # shoot
-        return action_list
-
     def _apply_phase_mask(self, action_list: list[float]) -> list[float]:
         """Lock action heads based on curriculum phase.
 
         Phase 1: Scripted movement (random candidate, held 8-20 steps).
-               Agent learns shoot only.
-        Phase 2+: No masking (only move + shoot).
+               Agent learns shoot/reload/use only.
+        Phase 2+: No masking.
         """
-        if self.phase is None or len(action_list) < 2:
+        if self.phase is None or len(action_list) < 4:
             return action_list
 
         if self.phase == 1:

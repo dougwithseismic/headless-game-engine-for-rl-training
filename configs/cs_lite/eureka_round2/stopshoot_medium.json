@@ -1,0 +1,12 @@
+{
+  "reward_kill": 3.0,
+  "reward_death": 0.0,
+  "reward_damage_dealt": 5.0,
+  "reward_damage_taken": 0.0,
+  "reward_round_win": 5.0,
+  "reward_round_loss": 0.0,
+  "reward_near_miss": 0.05,
+  "reward_bomb_plant": 3.0,
+  "reward_bomb_defuse": 3.0,
+  "reward_moving_shot": -0.3
+}

@@ -8,12 +8,13 @@ use ghostlobby_engine::config::GameConfig;
 use ghostlobby_engine::ecs::resources::{ObstacleLayout, SpawnPointPool};
 use ghostlobby_engine::scenarios::cs_lite::CsLiteScenario;
 use ghostlobby_engine::scenarios::tactical_deathmatch::TacticalDeathmatchScenario;
+use ghostlobby_engine::strategy::StrategyState;
 use ghostlobby_engine::tick::{TickMode, TickRunner};
 use ghostlobby_telemetry::ws_sink::WsSink;
 use ghostlobby_telemetry::TelemetrySink;
 
 use crate::api::{MatchResponse, ObstacleRectDto, ObstaclesResponse};
-use crate::state::EngineCommand;
+use crate::state::{EngineCommand, StrategyStateResponse};
 
 pub async fn run_tick_loop(
     config: GameConfig,
@@ -103,6 +104,21 @@ pub async fn run_tick_loop(
                         obstacles,
                         spawn_points,
                     });
+                }
+                EngineCommand::InjectDirective { directive } => {
+                    if let Some(mut strategy) = runner.world_mut().get_resource_mut::<StrategyState>() {
+                        strategy.inbox.push(directive);
+                    }
+                }
+                EngineCommand::GetStrategyState { reply } => {
+                    let response = runner.world().get_resource::<StrategyState>().map(|s| {
+                        StrategyStateResponse {
+                            snapshot: s.last_snapshot.clone(),
+                            intents: s.last_intents.clone().unwrap_or_default(),
+                            last_directives: s.last_directives.clone(),
+                        }
+                    });
+                    let _ = reply.send(response);
                 }
                 EngineCommand::Reset => {
                     info!("resetting engine");

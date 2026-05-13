@@ -94,6 +94,51 @@ pub struct PlantDefuseProgress {
 }
 
 // ---------------------------------------------------------------------------
+// Goal conditioning (Phase 3)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectiveType {
+    PlantBomb,
+    DefuseBomb,
+    HoldPosition,
+    Eliminate,
+    Rotate,
+}
+
+impl Default for ObjectiveType {
+    fn default() -> Self { Self::Eliminate }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Posture {
+    Aggressive,
+    Default,
+    Passive,
+}
+
+impl Default for Posture {
+    fn default() -> Self { Self::Default }
+}
+
+#[derive(Component, Debug, Clone)]
+pub struct AgentGoal {
+    pub objective: ObjectiveType,
+    pub target_position: Vec3,
+    pub posture: Posture,
+}
+
+impl Default for AgentGoal {
+    fn default() -> Self {
+        Self {
+            objective: ObjectiveType::Eliminate,
+            target_position: Vec3::ZERO,
+            posture: Posture::Default,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Round phase state machine
 // ---------------------------------------------------------------------------
 
@@ -173,182 +218,6 @@ pub struct BombSites {
 }
 
 // ---------------------------------------------------------------------------
-// Strategy system — pluggable team coordination layer
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttackStrategy {
-    RushA,
-    RushB,
-    SplitAB,
-    SlowDefault,
-    FakeARushB,
-    FakeBRushA,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DefenseStrategy {
-    Default,
-    StackA,
-    StackB,
-    Aggressive,
-}
-
-#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AgentRole {
-    EntryFragger,
-    BombRunner,
-    Support,
-    Lurker,
-    SecondEntry,
-    SiteAnchorA,
-    SiteAnchorB,
-    MidHold,
-    Rotator,
-}
-
-impl Default for AgentRole {
-    fn default() -> Self {
-        Self::Support
-    }
-}
-
-#[derive(Resource, Debug, Clone)]
-pub struct ActiveStrategy {
-    pub attack: AttackStrategy,
-    pub defense: DefenseStrategy,
-    pub target_site: u8,
-}
-
-impl Default for ActiveStrategy {
-    fn default() -> Self {
-        Self {
-            attack: AttackStrategy::RushA,
-            defense: DefenseStrategy::Default,
-            target_site: 0,
-        }
-    }
-}
-
-pub trait StrategyProvider: Send + Sync {
-    fn select_strategies(
-        &self,
-        round_number: u32,
-        t_score: u32,
-        ct_score: u32,
-    ) -> (AttackStrategy, DefenseStrategy);
-
-    fn assign_attack_roles(&self, strategy: AttackStrategy, team_size: usize) -> Vec<AgentRole>;
-    fn assign_defense_roles(&self, strategy: DefenseStrategy, team_size: usize) -> Vec<AgentRole>;
-}
-
-#[derive(Resource)]
-pub struct ScriptedStrategyBox(pub Box<dyn StrategyProvider>);
-
-pub struct ScriptedStrategyProvider;
-
-impl ScriptedStrategyProvider {
-    const ATTACK_CYCLE: [AttackStrategy; 6] = [
-        AttackStrategy::RushA,
-        AttackStrategy::RushB,
-        AttackStrategy::SplitAB,
-        AttackStrategy::SlowDefault,
-        AttackStrategy::FakeARushB,
-        AttackStrategy::FakeBRushA,
-    ];
-
-    const DEFENSE_CYCLE: [DefenseStrategy; 6] = [
-        DefenseStrategy::Default,
-        DefenseStrategy::Default,
-        DefenseStrategy::StackA,
-        DefenseStrategy::StackB,
-        DefenseStrategy::Aggressive,
-        DefenseStrategy::Default,
-    ];
-}
-
-impl StrategyProvider for ScriptedStrategyProvider {
-    fn select_strategies(
-        &self,
-        round_number: u32,
-        _t_score: u32,
-        _ct_score: u32,
-    ) -> (AttackStrategy, DefenseStrategy) {
-        let aidx = (round_number as usize).wrapping_sub(1) % Self::ATTACK_CYCLE.len();
-        let didx = (round_number as usize).wrapping_sub(1) % Self::DEFENSE_CYCLE.len();
-        (Self::ATTACK_CYCLE[aidx], Self::DEFENSE_CYCLE[didx])
-    }
-
-    fn assign_attack_roles(&self, strategy: AttackStrategy, team_size: usize) -> Vec<AgentRole> {
-        let base: &[AgentRole] = match strategy {
-            AttackStrategy::RushA | AttackStrategy::RushB => &[
-                AgentRole::EntryFragger,
-                AgentRole::BombRunner,
-                AgentRole::Support,
-                AgentRole::SecondEntry,
-                AgentRole::Support,
-            ],
-            AttackStrategy::SplitAB => &[
-                AgentRole::EntryFragger,
-                AgentRole::BombRunner,
-                AgentRole::Support,
-                AgentRole::Lurker,
-                AgentRole::SecondEntry,
-            ],
-            AttackStrategy::SlowDefault => &[
-                AgentRole::EntryFragger,
-                AgentRole::BombRunner,
-                AgentRole::Support,
-                AgentRole::Lurker,
-                AgentRole::SecondEntry,
-            ],
-            AttackStrategy::FakeARushB | AttackStrategy::FakeBRushA => &[
-                AgentRole::Lurker,
-                AgentRole::BombRunner,
-                AgentRole::EntryFragger,
-                AgentRole::SecondEntry,
-                AgentRole::Support,
-            ],
-        };
-        base.iter().copied().take(team_size).collect()
-    }
-
-    fn assign_defense_roles(&self, strategy: DefenseStrategy, team_size: usize) -> Vec<AgentRole> {
-        let base: &[AgentRole] = match strategy {
-            DefenseStrategy::Default => &[
-                AgentRole::SiteAnchorA,
-                AgentRole::SiteAnchorA,
-                AgentRole::MidHold,
-                AgentRole::SiteAnchorB,
-                AgentRole::SiteAnchorB,
-            ],
-            DefenseStrategy::StackA => &[
-                AgentRole::SiteAnchorA,
-                AgentRole::SiteAnchorA,
-                AgentRole::SiteAnchorA,
-                AgentRole::MidHold,
-                AgentRole::SiteAnchorB,
-            ],
-            DefenseStrategy::StackB => &[
-                AgentRole::SiteAnchorA,
-                AgentRole::MidHold,
-                AgentRole::SiteAnchorB,
-                AgentRole::SiteAnchorB,
-                AgentRole::SiteAnchorB,
-            ],
-            DefenseStrategy::Aggressive => &[
-                AgentRole::SiteAnchorA,
-                AgentRole::Rotator,
-                AgentRole::MidHold,
-                AgentRole::Rotator,
-                AgentRole::SiteAnchorB,
-            ],
-        };
-        base.iter().copied().take(team_size).collect()
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
@@ -389,6 +258,7 @@ pub struct CsLiteConfig {
     pub reward_bomb_pickup: f32,
     pub reward_bomb_plant: f32,
     pub reward_bomb_defuse: f32,
+    pub reward_moving_shot: f32,
 }
 
 impl CsLiteConfig {
@@ -429,6 +299,7 @@ impl CsLiteConfig {
             reward_bomb_pickup: config.extra_f32("reward_bomb_pickup", 0.1),
             reward_bomb_plant: config.extra_f32("reward_bomb_plant", 0.5),
             reward_bomb_defuse: config.extra_f32("reward_bomb_defuse", 1.0),
+            reward_moving_shot: config.extra_f32("reward_moving_shot", 0.0),
         }
     }
 
@@ -481,6 +352,8 @@ impl Scenario for CsLiteScenario {
         ActionSpaceDef::new(vec![
             ActionHead::Discrete { name: "move_target".into(), n: 12 },
             ActionHead::Discrete { name: "shoot".into(), n: 2 },
+            ActionHead::Discrete { name: "reload".into(), n: 2 },
+            ActionHead::Discrete { name: "use_action".into(), n: 3 },
         ])
     }
 
@@ -503,8 +376,8 @@ impl Scenario for CsLiteScenario {
                 ObsFeature { name: "raycasts_3d".into(), shape: vec![total_rays, 2] },
                 ObsFeature { name: "audio_3d".into(), shape: vec![6] },
                 ObsFeature { name: "aim_state".into(), shape: vec![5] },
-                // 12 move + 1 shoot + 1 alive = 14
-                ObsFeature { name: "action_mask".into(), shape: vec![14] },
+                ObsFeature { name: "goal_state".into(), shape: vec![11] },
+                ObsFeature { name: "action_mask".into(), shape: vec![19] },
             ],
         }
     }
@@ -667,6 +540,7 @@ impl Scenario for CsLiteScenario {
                 EnemyMemory::default(),
                 PathState::default(),
                 LosTracker::default(),
+                AgentGoal::default(),
             ));
             if i == 0 { first_t_entity = Some(eid); }
             source_id += 1;
@@ -708,21 +582,14 @@ impl Scenario for CsLiteScenario {
                 EnemyMemory::default(),
                 PathState::default(),
                 LosTracker::default(),
+                AgentGoal::default(),
             ));
             source_id += 1;
         }
 
-        // Assign initial roles via strategy provider
+        // Assign bomb to first T-side agent
         {
-            let provider = ScriptedStrategyProvider;
-            let (attack, defense) = provider.select_strategies(1, 0, 0);
-            let attack_roles = provider.assign_attack_roles(attack, ppt as usize);
-            let defense_roles = provider.assign_defense_roles(defense, ppt as usize);
-
-            let mut t_idx = 0usize;
-            let mut ct_idx = 0usize;
             let mut role_query = world.query::<(Entity, &Team, &Agent)>();
-            let mut assignments: Vec<(Entity, AgentRole)> = Vec::new();
             let mut entities_sorted: Vec<(Entity, u8, u32)> = role_query
                 .iter(world)
                 .map(|(e, t, a)| (e, t.0, a.source_id))
@@ -730,28 +597,11 @@ impl Scenario for CsLiteScenario {
             entities_sorted.sort_by_key(|(_, _, sid)| *sid);
 
             for (entity, team, _) in &entities_sorted {
-                let role = if *team == 0 {
-                    let r = attack_roles.get(t_idx).copied().unwrap_or(AgentRole::Support);
-                    t_idx += 1;
-                    r
-                } else {
-                    let r = defense_roles.get(ct_idx).copied().unwrap_or(AgentRole::SiteAnchorA);
-                    ct_idx += 1;
-                    r
-                };
-                assignments.push((*entity, role));
+                if *team == 0 {
+                    world.entity_mut(*entity).insert(BombCarrier);
+                    break;
+                }
             }
-            for (entity, role) in assignments {
-                world.entity_mut(entity).insert(role);
-            }
-
-            let target_site = match attack {
-                AttackStrategy::RushA | AttackStrategy::FakeBRushA => 0,
-                AttackStrategy::RushB | AttackStrategy::FakeARushB => 1,
-                AttackStrategy::SplitAB | AttackStrategy::SlowDefault => 0,
-            };
-            world.insert_resource(ActiveStrategy { attack, defense, target_site });
-            world.insert_resource(ScriptedStrategyBox(Box::new(ScriptedStrategyProvider)));
         }
 
         let round_state = CsRoundState::new(&cs_config);
@@ -764,11 +614,15 @@ impl Scenario for CsLiteScenario {
     fn register_systems(&self, schedule: &mut Schedule) {
         if self.dummy_ai {
             schedule.add_systems(
-                super::cs_lite_dummy_ai::cs_dummy_ai_system.in_set(EnginePhase::AiDecisions),
+                (cs_goal_assignment_system, super::cs_lite_dummy_ai::cs_dummy_ai_system)
+                    .chain()
+                    .in_set(EnginePhase::AiDecisions),
             );
         } else {
             schedule.add_systems(
-                cs_scripted_ai_system.in_set(EnginePhase::AiDecisions),
+                (cs_goal_assignment_system, cs_scripted_ai_system)
+                    .chain()
+                    .in_set(EnginePhase::AiDecisions),
             );
         }
         schedule.add_systems(
@@ -785,6 +639,7 @@ impl Scenario for CsLiteScenario {
             (
                 crate::weapons::inventory_cooldown_system,
                 cs_weapon_switch_system,
+                cs_reload_system,
                 cs_combat_system,
                 cs_bomb_system,
             )
@@ -1114,16 +969,52 @@ impl Scenario for CsLiteScenario {
         }
         writer.write("aim_state", &[aim_yaw_error, aim_dist, aim_on_target, aim_ticks_to_lock, aim_has_target]);
 
-        // Action mask [14]: 12 move + 1 shoot + 1 alive
+        // Goal state [11]: objective one-hot [5] + relative target [3] + posture one-hot [3]
+        let goal_obs = if let Some(goal) = world.get::<AgentGoal>(agent) {
+            let obj = match goal.objective {
+                ObjectiveType::PlantBomb => [1.0, 0.0, 0.0, 0.0, 0.0],
+                ObjectiveType::DefuseBomb => [0.0, 1.0, 0.0, 0.0, 0.0],
+                ObjectiveType::HoldPosition => [0.0, 0.0, 1.0, 0.0, 0.0],
+                ObjectiveType::Eliminate => [0.0, 0.0, 0.0, 1.0, 0.0],
+                ObjectiveType::Rotate => [0.0, 0.0, 0.0, 0.0, 1.0],
+            };
+            let delta = goal.target_position - pos3;
+            let dx = (delta.x / config.arena_width).clamp(-1.0, 1.0);
+            let dy = (delta.y / config.arena_height).clamp(-1.0, 1.0);
+            let dz = (delta.z / config.arena_depth).clamp(-1.0, 1.0);
+            let posture = match goal.posture {
+                Posture::Aggressive => [1.0, 0.0, 0.0],
+                Posture::Default => [0.0, 1.0, 0.0],
+                Posture::Passive => [0.0, 0.0, 1.0],
+            };
+            [obj[0], obj[1], obj[2], obj[3], obj[4], dx, dy, dz, posture[0], posture[1], posture[2]]
+        } else {
+            [0.0; 11]
+        };
+        writer.write("goal_state", &goal_obs);
+
         let frozen = round.phase != RoundPhase::Active;
-        let can_shoot = !frozen && !is_dead && inv
-            .and_then(|i| i.active_weapon())
+        let active_weapon = inv.and_then(|i| i.active_weapon());
+        let can_shoot = !frozen && !is_dead && active_weapon
             .map(|w| w.cooldown_remaining <= 0.0 && w.ammo > 0 && !w.is_reloading)
+            .unwrap_or(false);
+        let can_reload = !frozen && !is_dead && active_weapon
+            .map(|w| w.ammo < w.max_ammo && !w.is_reloading)
             .unwrap_or(false);
         let alive_and_active = if !is_dead && !frozen { 1.0 } else { 0.0 };
 
-        let mut mask = Vec::with_capacity(14);
-        // 12 movement candidate masks
+        let bomb = world.resource::<BombState>();
+        let bomb_sites = world.resource::<BombSites>();
+        let has_bomb_carrier_mask = world.get::<BombCarrier>(agent).is_some();
+        let can_plant = !frozen && !is_dead && self_team == 0 && has_bomb_carrier_mask && !bomb.planted && {
+            let dist_a = (pos3 - bomb_sites.site_a_center).length();
+            let dist_b = (pos3 - bomb_sites.site_b_center).length();
+            dist_a < bomb_sites.site_a_radius || dist_b < bomb_sites.site_b_radius
+        };
+        let can_defuse = !frozen && !is_dead && self_team == 1 && bomb.planted
+            && bomb.plant_position.map(|bp| (pos3 - bp).length() < bomb_sites.site_a_radius).unwrap_or(false);
+
+        let mut mask = Vec::with_capacity(19);
         if let Some(cand_set) = candidate_buffer.get(agent) {
             let wmask = cand_set.walkable_mask();
             for &m in &wmask {
@@ -1132,8 +1023,13 @@ impl Scenario for CsLiteScenario {
         } else {
             for _ in 0..12 { mask.push(alive_and_active); }
         }
-        mask.push(if can_shoot { 1.0 } else { 0.0 }); // shoot
-        mask.push(if !is_dead { 1.0 } else { 0.0 }); // alive
+        mask.push(1.0);
+        mask.push(if can_shoot { 1.0 } else { 0.0 });
+        mask.push(1.0);
+        mask.push(if can_reload { 1.0 } else { 0.0 });
+        mask.push(1.0);
+        mask.push(if can_plant { 1.0 } else { 0.0 });
+        mask.push(if can_defuse { 1.0 } else { 0.0 });
 
         writer.write("action_mask", &mask);
     }
@@ -1170,6 +1066,90 @@ fn make_pistol() -> WeaponSlot {
 // ---------------------------------------------------------------------------
 // ECS Systems
 // ---------------------------------------------------------------------------
+
+#[allow(clippy::type_complexity)]
+pub fn cs_goal_assignment_system(
+    mut commands: Commands,
+    agents: Query<(Entity, &Position3D, &Team, Option<&BombCarrier>, Option<&super::cs_lite_bridge::StrategyControlled>), Without<Dead>>,
+    round: Res<CsRoundState>,
+    bomb: Res<BombState>,
+    bomb_sites: Res<BombSites>,
+    config: Res<CsLiteConfig>,
+    game_config: Res<GameConfigResource>,
+    tick: Res<TickState>,
+) {
+    let randomize = game_config.0.extra_bool("randomize_goals", false);
+
+    if randomize && tick.tick % 256 == 0 {
+        let mut rng = rand::rng();
+        for (entity, _, _, _, strategy) in &agents {
+            if strategy.is_some() { continue; }
+            let objective = match rng.random_range(0u8..5) {
+                0 => ObjectiveType::PlantBomb,
+                1 => ObjectiveType::DefuseBomb,
+                2 => ObjectiveType::HoldPosition,
+                3 => ObjectiveType::Eliminate,
+                _ => ObjectiveType::Rotate,
+            };
+            let target_position = Vec3::new(
+                rng.random_range(2.0..config.arena_width - 2.0),
+                0.0,
+                rng.random_range(2.0..config.arena_depth - 2.0),
+            );
+            let posture = match rng.random_range(0u8..3) {
+                0 => Posture::Aggressive,
+                1 => Posture::Default,
+                _ => Posture::Passive,
+            };
+            commands.entity(entity).insert(AgentGoal { objective, target_position, posture });
+        }
+        return;
+    }
+
+    if round.phase == RoundPhase::BuyFreeze {
+        let mid = (bomb_sites.site_a_center + bomb_sites.site_b_center) * 0.5;
+        for (entity, pos3, team, carrier, strategy) in &agents {
+            if strategy.is_some() { continue; }
+            let goal = if team.0 == 0 {
+                if carrier.is_some() {
+                    AgentGoal { objective: ObjectiveType::HoldPosition, target_position: pos3.0, posture: Posture::Default }
+                } else {
+                    AgentGoal { objective: ObjectiveType::HoldPosition, target_position: pos3.0, posture: Posture::Default }
+                }
+            } else {
+                AgentGoal { objective: ObjectiveType::HoldPosition, target_position: mid, posture: Posture::Default }
+            };
+            commands.entity(entity).insert(goal);
+        }
+        return;
+    }
+
+    if round.phase != RoundPhase::Active { return; }
+
+    for (entity, pos3, team, carrier, strategy) in &agents {
+        if strategy.is_some() { continue; }
+        let goal = if team.0 == 0 {
+            if carrier.is_some() {
+                let dist_a = (pos3.0 - bomb_sites.site_a_center).length();
+                let dist_b = (pos3.0 - bomb_sites.site_b_center).length();
+                let nearest_site = if dist_a < dist_b { bomb_sites.site_a_center } else { bomb_sites.site_b_center };
+                AgentGoal { objective: ObjectiveType::PlantBomb, target_position: nearest_site, posture: Posture::Default }
+            } else {
+                let dist_a = (pos3.0 - bomb_sites.site_a_center).length();
+                let dist_b = (pos3.0 - bomb_sites.site_b_center).length();
+                let nearest_site = if dist_a < dist_b { bomb_sites.site_a_center } else { bomb_sites.site_b_center };
+                AgentGoal { objective: ObjectiveType::Eliminate, target_position: nearest_site, posture: Posture::Aggressive }
+            }
+        } else if bomb.planted {
+            let target = bomb.plant_position.unwrap_or(bomb_sites.site_a_center);
+            AgentGoal { objective: ObjectiveType::DefuseBomb, target_position: target, posture: Posture::Aggressive }
+        } else {
+            let mid = (bomb_sites.site_a_center + bomb_sites.site_b_center) * 0.5;
+            AgentGoal { objective: ObjectiveType::HoldPosition, target_position: mid, posture: Posture::Default }
+        };
+        commands.entity(entity).insert(goal);
+    }
+}
 
 #[allow(clippy::type_complexity)]
 pub fn cs_facing_system(
@@ -1524,38 +1504,37 @@ pub fn cs_sync_system(
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn cs_scripted_ai_system(
     agents: Query<
-        (Entity, &Position3D, &Facing3D, &Team, &PhysicsHandle3D, Option<&AgentRole>),
+        (Entity, &Position3D, &Facing3D, &Team, &PhysicsHandle3D, Option<&Inventory>, Option<&BombCarrier>, Option<&AgentGoal>),
         (With<Agent>, Without<Dead>),
     >,
-    carriers: Query<(Entity, &BombCarrier)>,
     mut raw_buffer: ResMut<RawActionBuffer>,
     config: Res<CsLiteConfig>,
     round: Res<CsRoundState>,
-    bomb_sites: Res<BombSites>,
-    bomb_state: Res<BombState>,
-    strategy: Res<ActiveStrategy>,
     tick: Res<TickState>,
     physics3d: Res<Physics3DState>,
+    bomb: Res<BombState>,
+    bomb_sites: Res<BombSites>,
 ) {
     if round.phase != RoundPhase::Active { return; }
 
     let all: Vec<_> = agents.iter()
-        .map(|(e, p, _f, t, ph, _role)| (e, p.0, t.0, ph.collider))
+        .map(|(e, p, _f, t, ph, _, _, _)| (e, p.0, t.0, ph.collider))
         .collect();
 
-    for &(entity, pos, team, _self_collider) in &all {
+    for (entity, pos3, _facing, team, _ph, inv, carrier, goal) in &agents {
+        let pos = pos3.0;
+        let team_id = team.0;
         if raw_buffer.get(entity).is_some() { continue; }
 
         let eye_pos = pos + Vec3::Y * config.eye_height;
 
-        // Find nearest enemy (any, not just visible — know where to go)
         let mut nearest_enemy_pos = None;
         let mut nearest_enemy_dist = f32::MAX;
         let mut visible_enemy_pos = None;
         let mut visible_enemy_dist = f32::MAX;
 
         for &(other_e, other_pos, other_team, _) in &all {
-            if other_e == entity || other_team == team { continue; }
+            if other_e == entity || other_team == team_id { continue; }
             let d = pos.distance(other_pos);
             if d < 0.1 { continue; }
 
@@ -1577,9 +1556,30 @@ pub fn cs_scripted_ai_system(
         let agent_hash = entity.to_bits();
 
         if visible_enemy_pos.is_some() {
-            // Auto-aim handles facing, so just shoot when visible
             shoot = 1.0;
+        }
 
+        let has_objective_goal = matches!(
+            goal,
+            Some(g) if matches!(g.objective, ObjectiveType::PlantBomb | ObjectiveType::DefuseBomb | ObjectiveType::Rotate)
+                && g.target_position != Vec3::ZERO
+        );
+
+        if has_objective_goal {
+            let target = goal.unwrap().target_position;
+            let to_target = (target - pos).normalize_or_zero();
+            if to_target.length_squared() < 0.01 {
+                move_target = 8.0;
+            } else {
+                let mut best_compass = 0usize;
+                let mut best_dot = f32::MIN;
+                for (i, &(cx, cz)) in COMPASS_DIRS.iter().enumerate() {
+                    let dot = to_target.x * cx + to_target.z * cz;
+                    if dot > best_dot { best_dot = dot; best_compass = i; }
+                }
+                move_target = best_compass as f32;
+            }
+        } else if visible_enemy_pos.is_some() {
             if visible_enemy_dist > 12.0 {
                 move_target = 10.0;
             } else if visible_enemy_dist < 5.0 {
@@ -1589,149 +1589,42 @@ pub fn cs_scripted_ai_system(
                 let phase = (tick.tick / 30 + agent_hash) % 3;
                 move_target = match phase { 0 => 10.0, 1 => 9.0, _ => 10.0 };
             }
-        } else if let Some(enemy_pos) = nearest_enemy_pos {
-            let to_enemy = (enemy_pos - pos).normalize_or_zero();
-            let phase = (tick.tick / 40 + agent_hash) % 5;
-            if phase < 3 {
-                let mut best_compass = 0usize;
-                let mut best_dot = f32::MIN;
-                for (i, &(cx, cz)) in COMPASS_DIRS.iter().enumerate() {
-                    let dot = to_enemy.x * cx + to_enemy.z * cz;
-                    if dot > best_dot { best_dot = dot; best_compass = i; }
-                }
-                move_target = best_compass as f32;
-            } else {
-                let flank_dir = Vec3::new(-to_enemy.z, 0.0, to_enemy.x);
-                let flank = if agent_hash % 2 == 0 { flank_dir } else { -flank_dir };
-                let mut best_compass = 0usize;
-                let mut best_dot = f32::MIN;
-                for (i, &(cx, cz)) in COMPASS_DIRS.iter().enumerate() {
-                    let dot = flank.x * cx + flank.z * cz;
-                    if dot > best_dot { best_dot = dot; best_compass = i; }
-                }
-                move_target = best_compass as f32;
-            }
         } else {
-            move_target = 10.0;
+            let nav_target = nearest_enemy_pos.unwrap_or(pos);
+            let to_target = (nav_target - pos).normalize_or_zero();
+            if to_target.length_squared() < 0.01 {
+                move_target = 8.0;
+            } else {
+                let mut best_compass = 0usize;
+                let mut best_dot = f32::MIN;
+                for (i, &(cx, cz)) in COMPASS_DIRS.iter().enumerate() {
+                    let dot = to_target.x * cx + to_target.z * cz;
+                    if dot > best_dot { best_dot = dot; best_compass = i; }
+                }
+                move_target = best_compass as f32;
+            }
         }
 
-        let action = vec![move_target, shoot];
+        let reload = if let Some(inventory) = inv {
+            if let Some(weapon) = inventory.active_weapon() {
+                if weapon.ammo == 0 && !weapon.is_reloading { 1.0 } else { 0.0 }
+            } else { 0.0 }
+        } else { 0.0 };
+
+        let use_action = if team_id == 0 && carrier.is_some() && !bomb.planted {
+            let dist_a = (pos - bomb_sites.site_a_center).length();
+            let dist_b = (pos - bomb_sites.site_b_center).length();
+            if dist_a < bomb_sites.site_a_radius || dist_b < bomb_sites.site_b_radius {
+                1.0
+            } else { 0.0 }
+        } else if team_id == 1 && bomb.planted {
+            if let Some(bp) = bomb.plant_position {
+                if (pos - bp).length() < 6.0 { 2.0 } else { 0.0 }
+            } else { 0.0 }
+        } else { 0.0 };
+
+        let action = vec![move_target, shoot, reload, use_action];
         raw_buffer.insert(entity, action);
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EngageStyle {
-    Aggressive,
-    Hold,
-    Passive,
-    TradeKill,
-}
-
-fn role_behavior_params(role: AgentRole, team: u8) -> (f32, f32, EngageStyle) {
-    if team == 0 {
-        match role {
-            AgentRole::EntryFragger | AgentRole::SecondEntry => (0.9, 6.0, EngageStyle::Aggressive),
-            AgentRole::BombRunner => (0.3, 5.0, EngageStyle::Passive),
-            AgentRole::Support => (0.6, 6.0, EngageStyle::TradeKill),
-            AgentRole::Lurker => (0.2, 8.0, EngageStyle::Passive),
-            _ => (0.5, 6.0, EngageStyle::Hold),
-        }
-    } else {
-        match role {
-            AgentRole::SiteAnchorA | AgentRole::SiteAnchorB => (0.3, 8.0, EngageStyle::Hold),
-            AgentRole::MidHold => (0.4, 10.0, EngageStyle::Hold),
-            AgentRole::Rotator => (0.7, 6.0, EngageStyle::Aggressive),
-            _ => (0.5, 6.0, EngageStyle::Hold),
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
-fn compute_role_objective(
-    team: u8,
-    role: AgentRole,
-    strategy: &ActiveStrategy,
-    bomb_sites: &BombSites,
-    bomb_state: &BombState,
-    mid_pos: Vec3,
-    _is_carrier: bool,
-    tick: u64,
-    agent_hash: u64,
-    aw: f32,
-    ad: f32,
-) -> Vec3 {
-    let ground_y = mid_pos.y;
-    let site_a = bomb_sites.site_a_center;
-    let site_b = bomb_sites.site_b_center;
-
-    if team == 0 {
-        if bomb_state.planted {
-            return bomb_state.plant_position.unwrap_or(site_a);
-        }
-
-        match strategy.attack {
-            AttackStrategy::RushA => site_a,
-            AttackStrategy::RushB => site_b,
-            AttackStrategy::SplitAB => {
-                match role {
-                    AgentRole::EntryFragger | AgentRole::BombRunner | AgentRole::Support => site_a,
-                    AgentRole::Lurker | AgentRole::SecondEntry => site_b,
-                    _ => site_a,
-                }
-            }
-            AttackStrategy::SlowDefault => {
-                let commit_tick = 400;
-                if tick < commit_tick {
-                    match role {
-                        AgentRole::EntryFragger => Vec3::new(aw * 0.3, ground_y, ad * 0.4),
-                        AgentRole::Lurker => Vec3::new(aw * 0.8, ground_y, ad * 0.3),
-                        _ => mid_pos,
-                    }
-                } else if strategy.target_site == 0 {
-                    site_a
-                } else {
-                    site_b
-                }
-            }
-            AttackStrategy::FakeARushB => match role {
-                AgentRole::Lurker => {
-                    if tick < 200 { site_a } else { site_b }
-                }
-                _ => site_b,
-            },
-            AttackStrategy::FakeBRushA => match role {
-                AgentRole::Lurker => {
-                    if tick < 200 { site_b } else { site_a }
-                }
-                _ => site_a,
-            },
-        }
-    } else {
-        if bomb_state.planted {
-            return bomb_state.plant_position.unwrap_or(site_a);
-        }
-
-        match role {
-            AgentRole::SiteAnchorA => {
-                let offset = ((agent_hash % 3) as f32 - 1.0) * 3.0;
-                Vec3::new(site_a.x + offset, ground_y, site_a.z + 3.0)
-            }
-            AgentRole::SiteAnchorB => {
-                let offset = ((agent_hash % 3) as f32 - 1.0) * 3.0;
-                Vec3::new(site_b.x + offset, ground_y, site_b.z + 3.0)
-            }
-            AgentRole::MidHold => mid_pos + Vec3::new(0.0, 0.0, ad * 0.1),
-            AgentRole::Rotator => {
-                let patrol_phase = (tick / 180 + agent_hash) % 2;
-                if patrol_phase == 0 {
-                    Vec3::new(aw * 0.35, ground_y, ad * 0.6)
-                } else {
-                    Vec3::new(aw * 0.65, ground_y, ad * 0.6)
-                }
-            }
-            _ => mid_pos,
-        }
     }
 }
 
@@ -1753,6 +1646,29 @@ pub fn cs_weapon_switch_system(
         if new_index < inv.weapons.len() && new_index != inv.active {
             inv.active = new_index;
             inv.weapons[new_index].cooldown_remaining = 0.3;
+        }
+    }
+}
+
+pub fn cs_reload_system(
+    mut query: Query<(Entity, &mut Inventory), Without<Dead>>,
+    raw_buffer: Res<RawActionBuffer>,
+    action_space: Res<ActionSpaceDef>,
+    round: Res<CsRoundState>,
+) {
+    if round.phase != RoundPhase::Active { return; }
+
+    for (entity, mut inv) in &mut query {
+        let Some(raw) = raw_buffer.get(entity) else { continue };
+        if raw.len() < action_space.total_size { continue; }
+
+        let reload = action_space.extract_head(raw, 2)[0].round() as u8;
+        if reload != 1 { continue; }
+
+        let Some(weapon) = inv.active_weapon_mut() else { continue };
+        if weapon.ammo < weapon.max_ammo && !weapon.is_reloading {
+            weapon.is_reloading = true;
+            weapon.reload_remaining = if weapon.reload_time > 0.0 { weapon.reload_time } else { 2.0 };
         }
     }
 }
@@ -1807,6 +1723,13 @@ pub fn cs_combat_system(
         let speed_xz = (shooter_vel.0.x * shooter_vel.0.x + shooter_vel.0.z * shooter_vel.0.z).sqrt();
         let speed_frac = (speed_xz / config.max_speed).min(1.0);
         let accuracy_mult = 1.0 - speed_frac * 0.6;
+
+        // Penalty for shooting while moving, scaled by speed fraction
+        if config.reward_moving_shot != 0.0 && speed_frac > 0.1 {
+            let penalty = config.reward_moving_shot * speed_frac;
+            rewards.add(shooter_entity, penalty);
+            breakdown.add(shooter_entity, "moving_shot", penalty);
+        }
         let effective_hitbox = config.hitbox_radius * accuracy_mult;
 
         let mut best_hit: Option<(Entity, f32, bool)> = None;
@@ -1961,9 +1884,9 @@ pub fn cs_bomb_system(
     for (entity, pos3, team, carrier, _progress) in &agents {
         let Some(raw) = raw_buffer.get(entity) else { continue };
         if raw.len() < action_space.total_size { continue; }
-        if action_space.heads.len() <= 5 { continue; }
+        if action_space.heads.len() <= 3 { continue; }
 
-        let bomb_action = action_space.extract_head(raw, 5)[0].round() as u8;
+        let bomb_action = action_space.extract_head(raw, 3)[0].round() as u8;
 
         // Plant (T-side, carrying bomb, in site, action=1)
         if bomb_action == 1 && team.0 == 0 && carrier.is_some() && !bomb.planted {
@@ -1994,7 +1917,7 @@ pub fn cs_bomb_system(
         // Defuse (CT-side, bomb planted, near bomb, action=2)
         if bomb_action == 2 && team.0 == 1 && bomb.planted {
             if let Some(bp) = bomb.plant_position {
-                if (pos3.0 - bp).length() < 3.0 {
+                if (pos3.0 - bp).length() < bomb_sites.site_a_radius {
                     bomb.defused = true;
                     rewards.add(entity, config.reward_bomb_defuse);
                     breakdown.add(entity, "bomb_defuse", config.reward_bomb_defuse);
@@ -2071,8 +1994,6 @@ pub fn cs_round_state_system(
     mut breakdown: ResMut<RewardBreakdownBuffer>,
     mut telemetry: ResMut<TelemetryBuffer>,
     mut bomb: ResMut<BombState>,
-    strategy_provider: Res<ScriptedStrategyBox>,
-    mut active_strategy: ResMut<ActiveStrategy>,
 ) {
     let dt = tick.delta;
     round.phase_timer -= dt;
@@ -2151,58 +2072,18 @@ pub fn cs_round_state_system(
                 round.ct_alive = config.players_per_team;
                 round.round_winner = None;
 
-                // Select new strategy for this round
-                let (attack, defense) = strategy_provider.0.select_strategies(
-                    round.round_number, round.t_score, round.ct_score,
-                );
-                let target_site = match attack {
-                    AttackStrategy::RushA | AttackStrategy::FakeBRushA => 0,
-                    AttackStrategy::RushB | AttackStrategy::FakeARushB => 1,
-                    AttackStrategy::SplitAB | AttackStrategy::SlowDefault => 0,
-                };
-                active_strategy.attack = attack;
-                active_strategy.defense = defense;
-                active_strategy.target_site = target_site;
-
-                let ppt = config.players_per_team as usize;
-                let attack_roles = strategy_provider.0.assign_attack_roles(attack, ppt);
-                let defense_roles = strategy_provider.0.assign_defense_roles(defense, ppt);
-
-                // Collect agents sorted by source_id for deterministic role assignment
+                // Collect agents sorted by source_id for deterministic bomb assignment
                 let mut sorted_agents: Vec<(Entity, u8, u32)> = agents.iter()
                     .map(|(e, _, _, _, _, _, t, _, a)| (e, t.0, a.source_id))
                     .collect();
                 sorted_agents.sort_by_key(|(_, _, sid)| *sid);
 
-                let mut t_idx = 0usize;
-                let mut ct_idx = 0usize;
+                // Assign bomb to first T-side agent
                 let mut bomb_assigned = false;
-
                 for (entity, team_id, _) in &sorted_agents {
-                    let role = if *team_id == 0 {
-                        let r = attack_roles.get(t_idx).copied().unwrap_or(AgentRole::Support);
-                        t_idx += 1;
-                        r
-                    } else {
-                        let r = defense_roles.get(ct_idx).copied().unwrap_or(AgentRole::SiteAnchorA);
-                        ct_idx += 1;
-                        r
-                    };
-                    commands.entity(*entity).insert(role);
-
-                    // Assign bomb to the BombRunner, or first T if no BombRunner
-                    if *team_id == 0 && !bomb_assigned && role == AgentRole::BombRunner {
+                    if *team_id == 0 && !bomb_assigned {
                         commands.entity(*entity).insert(BombCarrier);
                         bomb_assigned = true;
-                    }
-                }
-                // Fallback: assign bomb to first T if no BombRunner was assigned
-                if !bomb_assigned {
-                    for (entity, team_id, _) in &sorted_agents {
-                        if *team_id == 0 {
-                            commands.entity(*entity).insert(BombCarrier);
-                            break;
-                        }
                     }
                 }
 

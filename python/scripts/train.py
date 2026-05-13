@@ -62,8 +62,13 @@ def parse_args():
     p.add_argument("--scripted-warmup", type=int, default=1_000_000)
     p.add_argument("--auto-stop", action="store_true")
     p.add_argument("--patience", type=int, default=15)
-    p.add_argument("--lstm", action="store_true", help="Use RecurrentPPO with LSTM policy")
-    p.add_argument("--lstm-hidden-size", type=int, default=256)
+    p.add_argument("--memory", default="none", choices=["none", "lstm", "gru"],
+                   help="Recurrent memory architecture (default: none = MLP)")
+    p.add_argument("--memory-hidden-size", type=int, default=256)
+    p.add_argument("--memory-sequence-length", type=int, default=None,
+                   help="Sequence length for recurrent training (default: SB3 default)")
+    # Deprecated alias: --lstm maps to --memory lstm
+    p.add_argument("--lstm", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--name", default=None)
     p.add_argument("--no-track-behavior", action="store_true",
                    help="Disable behavior tracking during eval")
@@ -79,6 +84,11 @@ def run_ppo(args):
     if args.entropy_schedule:
         parts = args.entropy_schedule.split(":")
         entropy_schedule = (float(parts[0]), float(parts[1]))
+
+    # --lstm is a deprecated alias for --memory lstm
+    memory = args.memory
+    if args.lstm and memory == "none":
+        memory = "lstm"
 
     trainer = PPOTrainer(
         scenario=args.scenario,
@@ -112,8 +122,9 @@ def run_ppo(args):
         scripted_warmup=args.scripted_warmup,
         auto_stop=args.auto_stop,
         patience=args.patience,
-        lstm=args.lstm,
-        lstm_hidden_size=args.lstm_hidden_size,
+        memory=memory,
+        memory_hidden_size=args.memory_hidden_size,
+        memory_sequence_length=args.memory_sequence_length,
         track_behavior=not args.no_track_behavior,
     )
     return trainer.train()
@@ -145,9 +156,17 @@ def run_bc(args):
     import numpy as np
     data = np.load(demos_path)
     obs_dim = data["observations"].shape[1]
-    act_dim = data["actions"].shape[1]
 
-    trainer = BCTrainer(obs_dim=obs_dim, act_dim=act_dim)
+    gym_class = _import_gym_class(args.scenario)
+    config = args.config
+    if not config:
+        print("Error: --config required for BC mode (needed for branch sizes)")
+        sys.exit(1)
+    tmp_env = gym_class(config_path=config, scenario=args.scenario, phase=args.phase)
+    branch_sizes = list(tmp_env.action_space.nvec)
+    tmp_env.close()
+
+    trainer = BCTrainer(obs_dim=obs_dim, branch_sizes=branch_sizes)
     stats = trainer.train(demos_path, epochs=50)
 
     output = args.output or f"data/bc_models/{args.scenario}"
@@ -157,14 +176,11 @@ def run_bc(args):
     trainer.save_reference(f"{output}_ref.pt")
 
     # Save SB3-compatible model
-    gym_class = _import_gym_class(args.scenario)
-    config = args.config
-    if not config:
-        print("Error: --config required to save SB3 model (needed for env creation)")
-        sys.exit(1)
     env = gym_class(config_path=config, scenario=args.scenario, phase=args.phase)
-    trainer.save_as_sb3(output, env)
-    env.close()
+    from stable_baselines3.common.vec_env import DummyVecEnv
+    vec_env = DummyVecEnv([lambda: env])
+    trainer.save_as_sb3(output, vec_env)
+    vec_env.close()
 
     print(f"BC model: {output}.zip")
     print(f"BC reference: {output}_ref.pt")

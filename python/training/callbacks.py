@@ -217,6 +217,7 @@ class SelfPlaySwapCallback(BaseCallback):
     def __init__(
         self,
         train_env,
+        eval_env=None,
         swap_interval: int = 500_000,
         scripted_warmup: int = 1_000_000,
         max_history: int = 20,
@@ -224,6 +225,7 @@ class SelfPlaySwapCallback(BaseCallback):
     ):
         super().__init__(verbose)
         self.train_env = train_env
+        self.eval_env = eval_env
         self.swap_interval = swap_interval
         self.scripted_warmup = scripted_warmup
         self.max_history = max_history
@@ -261,6 +263,12 @@ class SelfPlaySwapCallback(BaseCallback):
 
         for i in range(inner_vec.num_envs):
             inner_vec.env_method("set_opponent", wrapped, indices=[i])
+
+        if self.eval_env is not None:
+            eval_inner = self.eval_env.venv if hasattr(self.eval_env, "venv") else self.eval_env
+            eval_wrapped = _NormalizedOpponent(opponent, self.eval_env)
+            for i in range(eval_inner.num_envs):
+                eval_inner.env_method("set_opponent", eval_wrapped, indices=[i])
 
         if self.verbose:
             print(
@@ -486,11 +494,20 @@ class KLAnchorCallback(BaseCallback):
 
     def _on_rollout_end(self) -> bool:
         """Compute divergence and subtract penalty from rollout rewards."""
+        import gymnasium
         import torch
+
+        if isinstance(self.model.action_space, gymnasium.spaces.MultiDiscrete):
+            if not hasattr(self, "_kl_warned"):
+                print(
+                    "  [kl-anchor] Skipping: KL anchor not supported for "
+                    "MultiDiscrete action spaces (designed for continuous)."
+                )
+                self._kl_warned = True
+            return True
 
         beta = self._current_beta()
 
-        # Short-circuit when beta is effectively zero
         if beta < 1e-6:
             return True
 
@@ -499,7 +516,6 @@ class KLAnchorCallback(BaseCallback):
         orig_shape = obs.shape
         obs_flat = obs.reshape(-1, orig_shape[-1])  # (n_steps * n_envs, obs_dim)
 
-        # Get current PPO policy's mean actions
         with torch.no_grad():
             obs_tensor = torch.tensor(obs_flat, dtype=torch.float32).to(
                 self.model.policy.device
@@ -507,20 +523,15 @@ class KLAnchorCallback(BaseCallback):
             dist = self.model.policy.get_distribution(obs_tensor)
             current_actions = dist.distribution.mean.cpu().numpy()
 
-        # Get frozen BC reference actions
         bc_actions = self.bc_model.predict(obs_flat)
 
-        # MSE divergence per observation (proxy for KL)
         mse = np.mean((current_actions - bc_actions) ** 2, axis=-1)
         mean_mse = float(mse.mean())
 
-        # Reshape penalty to match rewards buffer: (n_steps, n_envs)
         penalty = mse.reshape(orig_shape[:-1])
 
-        # Subtract penalty from rewards
         buf.rewards -= beta * penalty
 
-        # Log metrics
         self.logger.record("kl_anchor/mean_divergence", mean_mse)
         self.logger.record("kl_anchor/beta", float(beta))
         self.logger.record("kl_anchor/penalty", float(beta * mean_mse))

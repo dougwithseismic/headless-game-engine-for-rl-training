@@ -1,0 +1,43 @@
+{
+  "title": "cs_lite 1v1 Wide Arena",
+  "tick_rate": 60,
+  "arena": { "width": 160.0, "height": 120.0 },
+  "movement": { "max_speed": 7.0, "acceleration": 100.0, "friction": 50.0 },
+  "combat": { "default_weapon": { "damage": 25.0, "fire_rate": 0.3, "range": 200.0 } },
+  "spawning": { "respawn_delay": 999.0, "round_time_limit": 60.0 },
+  "teams": { "count": 2, "players_per_team": 1 },
+  "obstacles": [
+    { "x": 40.0, "y": 45.0, "width": 4.0, "height": 4.0 },
+    { "x": 116.0, "y": 45.0, "width": 4.0, "height": 4.0 },
+    { "x": 78.0, "y": 60.0, "width": 4.0, "height": 3.0 },
+    { "x": 40.0, "y": 75.0, "width": 4.0, "height": 4.0 },
+    { "x": 116.0, "y": 75.0, "width": 4.0, "height": 4.0 }
+  ],
+  "extra": {
+    "scenario": "cs_lite",
+    "arena_width": 160.0,
+    "arena_depth": 120.0,
+    "arena_height_3d": 10.0,
+    "max_rounds": 24,
+    "round_time_limit": 60.0,
+    "buy_time": 0.5,
+    "end_time": 0.5,
+    "ray_h_count": 9,
+    "ray_v_count": 5,
+    "ray_h_fov": 2.094,
+    "ray_v_fov": 1.396,
+    "ray_max_range": 200.0,
+    "hitbox_radius": 2.5,
+    "reward_kill": 3.0,
+    "reward_death": 0.0,
+    "reward_damage_dealt": 1.0,
+    "reward_damage_taken": 0.0,
+    "reward_round_win": 5.0,
+    "reward_round_loss": 0.0,
+    "reward_near_miss": 0.03,
+    "reward_friendly_fire": -2.0,
+    "reward_bomb_plant": 5.0,
+    "reward_bomb_defuse": 5.0,
+    "reward_bomb_pickup": 0.5
+  }
+}

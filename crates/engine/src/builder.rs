@@ -13,6 +13,7 @@ use crate::physics::PhysicsState;
 use crate::rewards::RewardFn;
 use crate::scenario::Scenario;
 use crate::scenarios::cs_lite::CsLiteScenario;
+use crate::strategy::{StrategyBridge, StrategyProvider};
 use crate::tick::TickRunner;
 
 type SystemConfigurator = Box<dyn FnOnce(&mut Schedule)>;
@@ -33,6 +34,8 @@ pub struct EngineBuilder {
     pub(crate) extractors: Option<ExtractorSet>,
     pub(crate) converter: Option<Box<dyn ObsConverter>>,
     pub(crate) reward_fn: Option<Box<dyn RewardFn>>,
+    #[allow(clippy::type_complexity)]
+    pub(crate) strategy: Option<(Box<dyn StrategyBridge>, Vec<Box<dyn StrategyProvider>>)>,
 }
 
 impl EngineBuilder {
@@ -45,6 +48,7 @@ impl EngineBuilder {
             extractors: None,
             converter: None,
             reward_fn: None,
+            strategy: None,
         }
     }
 
@@ -138,6 +142,15 @@ impl EngineBuilder {
     /// Only used with the `GameDef` path; ignored for legacy `Scenario`.
     pub fn with_reward_boxed(mut self, reward: Box<dyn RewardFn>) -> Self {
         self.reward_fn = Some(reward);
+        self
+    }
+
+    pub fn with_strategy(
+        mut self,
+        bridge: impl StrategyBridge + 'static,
+        providers: Vec<Box<dyn StrategyProvider>>,
+    ) -> Self {
+        self.strategy = Some((Box::new(bridge), providers));
         self
     }
 

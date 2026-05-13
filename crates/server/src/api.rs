@@ -1,8 +1,12 @@
 use std::sync::Arc;
 
 use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::Json;
 use serde::Serialize;
+
+use ghostlobby_engine::strategy::{Directive, IntentSpec};
 
 use crate::state::{AppState, EngineCommand};
 
@@ -86,4 +90,45 @@ pub async fn training() -> Json<serde_json::Value> {
         "phase_desc": "standalone",
         "last_reload_ago": 0
     }))
+}
+
+pub async fn post_strategy(
+    State(state): State<Arc<AppState>>,
+    Json(directive): Json<Directive>,
+) -> StatusCode {
+    let _ = state
+        .command_tx
+        .send(EngineCommand::InjectDirective { directive })
+        .await;
+    StatusCode::ACCEPTED
+}
+
+pub async fn get_strategy_state(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let _ = state
+        .command_tx
+        .send(EngineCommand::GetStrategyState { reply: tx })
+        .await;
+    match rx.await {
+        Ok(Some(response)) => Json(response).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
+pub async fn get_strategy_intents(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let _ = state
+        .command_tx
+        .send(EngineCommand::GetStrategyState { reply: tx })
+        .await;
+    match rx.await {
+        Ok(Some(response)) => Json(response.intents).into_response(),
+        Ok(None) => Json(Vec::<IntentSpec>::new()).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
 }
