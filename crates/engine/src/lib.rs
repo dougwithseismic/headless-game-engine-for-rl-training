@@ -17,6 +17,7 @@ pub mod rewards;
 pub mod scenario;
 pub mod scenarios;
 pub mod scripted_ai;
+pub mod strategy;
 pub mod sensors;
 pub mod telemetry;
 pub mod tick;

@@ -92,6 +92,11 @@ impl TickRunner {
         };
         runner.action_translator = action_translator;
         runner.reward_fn = reward_fn;
+        if let Some((bridge, providers)) = builder.strategy {
+            runner.world.insert_resource(
+                crate::strategy::StrategyState::new(bridge, providers),
+            );
+        }
         for add_fn in builder.custom_systems {
             add_fn(&mut runner.schedule);
         }
@@ -257,6 +262,9 @@ impl TickRunner {
 
     fn add_core_systems(schedule: &mut Schedule) {
         schedule.add_systems(systems::clear_buffers.in_set(EnginePhase::ClearBuffers));
+        schedule.add_systems(
+            crate::strategy::strategy_system.in_set(EnginePhase::AiDecisions),
+        );
         schedule.add_systems(
             (scripted_ai::run_scripted_ai, Self::flush_pending_actions)
                 .chain()

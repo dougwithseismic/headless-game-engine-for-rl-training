@@ -70,8 +70,8 @@ mod integration {
         let runner = make_runner();
         let action_space = runner.action_space_def();
 
-        assert_eq!(action_space.heads.len(), 6, "expected 6 action heads (move, yaw, pitch, shoot, weapon, bomb)");
-        assert_eq!(action_space.total_size, 6, "expected total_size = 6");
+        assert_eq!(action_space.heads.len(), 4, "expected 4 action heads (move_target, shoot, reload, use_action)");
+        assert_eq!(action_space.total_size, 4, "expected total_size = 4");
     }
 
     #[test]
@@ -149,7 +149,7 @@ mod integration {
         );
 
         let action_mask = obs.get("action_mask").expect("missing action_mask");
-        assert_eq!(action_mask.len(), 21, "action_mask should have 21 values (cs_lite: 12 move + 1 shoot + 1 alive + 4 weapon + 1 frozen + 1 plant + 1 defuse)");
+        assert_eq!(action_mask.len(), 19, "action_mask should have 19 values (cs_lite: 12 move + 2 shoot + 2 reload + 3 use)");
     }
 
     #[test]
@@ -167,9 +167,9 @@ mod integration {
         // Check z-position (index 2) since move_dir=0 is +Z in compass dirs
         let initial_pos = initial_obs[&0]["self_state"][2];
 
-        // cs_lite action: [move_dir=0(+Z), yaw=10(center), pitch=5(center), shoot=0, weapon=0, bomb=0]
+        // cs_lite action: [move_target=0(+Z), shoot=0, reload=0, use_action=0]
         let mut actions = HashMap::new();
-        actions.insert(agent_entity, vec![0.0, 10.0, 5.0, 0.0, 0.0, 0.0]);
+        actions.insert(agent_entity, vec![0.0, 0.0, 0.0, 0.0]);
 
         // Run enough ticks for candidate recomputation (every 4 ticks) + pathfinding
         for _ in 0..60 {
@@ -245,7 +245,7 @@ mod integration {
         let mut runner = make_runner();
 
         assert_eq!(runner.agent_registry().agents.len(), 10);
-        assert_eq!(runner.action_space_def().total_size, 6);
+        assert_eq!(runner.action_space_def().total_size, 4);
 
         for _ in 0..10 {
             runner.tick();
