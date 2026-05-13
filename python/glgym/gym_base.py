@@ -3,7 +3,7 @@ Base Gymnasium wrapper for GhostLobby environments.
 
 Extracts the shared logic from Arena3DGym, SelfPlayGym, SingleAgentGym,
 and GhostLobbyGym into a single base class. Subclasses override:
-  - _remap_actions()    to map continuous [-1,1] policy outputs to engine format
+  - _remap_actions()    to transform policy outputs before sending to engine
   - _apply_phase_mask() to lock action heads for curriculum learning
   - _init_agent_ids()   to set agent_id/opp_id on each reset
 """
@@ -78,18 +78,27 @@ class BaseGhostLobbyGym(gym.Env):
         self._scripted_move_target = 0
         self._scripted_move_hold = 0
 
+        # Replay buffer -- preserved across resets so frames survive env recreation
+        self._pending_replay: list[dict] = []
+        self._recording = False
+
         # Create environment and discover spaces
         self.env = gl.GhostLobbyEnv(config_path, scenario=scenario)
         space_info = self.env.action_space()
-        self.action_size: int = space_info["total_size"]
+
+        nvec = []
+        for h in space_info["heads"]:
+            if "Discrete" in h:
+                nvec.append(h["Discrete"]["n"])
+            elif "n" in h:
+                nvec.append(h["n"])
+        self.action_space = gym.spaces.MultiDiscrete(nvec)
+        self.action_size: int = len(nvec)
 
         obs, _ = self.env.reset()
         sample_obs = self._flatten_obs(obs[self.agent_id])
         self.obs_size: int = len(sample_obs)
 
-        self.action_space = gym.spaces.Box(
-            low=-1.0, high=1.0, shape=(self.action_size,), dtype=np.float32
-        )
         self.observation_space = gym.spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.obs_size,), dtype=np.float32
         )
@@ -108,10 +117,10 @@ class BaseGhostLobbyGym(gym.Env):
         self.opp_id = None
 
     def _remap_actions(self, action_list: list[float]) -> list[float]:
-        """Remap continuous [-1, 1] policy outputs to engine-expected format.
+        """Transform policy outputs before sending to the engine.
 
-        Default is identity (pass-through). Override for scenarios that need
-        discretisation or rescaling of action heads.
+        Default is identity (pass-through). With MultiDiscrete actions,
+        integer indices are passed directly.
         """
         return action_list
 
@@ -170,7 +179,8 @@ class BaseGhostLobbyGym(gym.Env):
             episode_start=episode_start,
             deterministic=False,
         )
-        return action.tolist() if hasattr(action, "tolist") else list(action)
+        raw = action.tolist() if hasattr(action, "tolist") else list(action)
+        return [float(a) for a in raw]
 
     # ------------------------------------------------------------------
     # Gymnasium interface
@@ -189,6 +199,13 @@ class BaseGhostLobbyGym(gym.Env):
         self.episode_ticks = 0
 
         self._init_agent_ids()
+
+        # Drain recorded frames before destroying the old env
+        if self._recording and hasattr(self, "env"):
+            try:
+                self._pending_replay = self.env.replay_frames()
+            except Exception:
+                pass
 
         self.env = gl.GhostLobbyEnv(self.config_path, scenario=self.scenario)
         obs, info = self.env.reset()
@@ -210,7 +227,7 @@ class BaseGhostLobbyGym(gym.Env):
         policy if present, accumulates reward over frame_skip ticks, and
         returns the standard Gymnasium 5-tuple.
         """
-        action_list = action.tolist() if hasattr(action, "tolist") else list(action)
+        action_list = [float(a) for a in (action.tolist() if hasattr(action, "tolist") else list(action))]
         action_list = self._remap_actions(action_list)
         action_list = self._apply_phase_mask(action_list)
 
@@ -326,13 +343,28 @@ class BaseGhostLobbyGym(gym.Env):
     # ------------------------------------------------------------------
 
     def start_recording(self):
+        self._recording = True
+        self._pending_replay = []
         self.env.start_recording()
 
     def stop_recording(self):
-        self.env.stop_recording()
+        self._recording = False
+        try:
+            self.env.stop_recording()
+        except Exception:
+            pass
 
     def save_replay(self, path: str):
-        import os
+        import json, os
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        self.env.save_replay(path)
-        self.env.stop_recording()
+        frames = self._pending_replay
+        if not frames:
+            try:
+                frames = self.env.replay_frames()
+            except Exception:
+                frames = []
+        with open(path, "w") as f:
+            for frame in frames:
+                f.write(json.dumps(frame) + "\n")
+        self._pending_replay = []
+        self._recording = False

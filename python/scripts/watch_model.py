@@ -51,7 +51,7 @@ def flatten_obs(agent_obs):
     return np.array(parts, dtype=np.float32)
 
 
-async def run(config_path, model_path, port, tick_rate, dummy_ai=False):
+async def run(config_path, model_path, port, tick_rate, dummy_ai=False, self_play=False):
     from stable_baselines3 import PPO
 
     print(f"Loading model: {model_path}")
@@ -61,6 +61,10 @@ async def run(config_path, model_path, port, tick_rate, dummy_ai=False):
     env = gl.GhostLobbyEnv(config_path, scenario=scenario)
     obs_dict, _ = env.reset()
     ppt = env.num_agents() // 2
+    num_agents = env.num_agents()
+
+    if self_play:
+        print(f"Self-play mode: model controls all {num_agents} agents")
 
     ws_clients: set[aiohttp.web.WebSocketResponse] = set()
 
@@ -80,8 +84,10 @@ async def run(config_path, model_path, port, tick_rate, dummy_ai=False):
     async def api_health(req):
         return aiohttp.web.json_response({"status": "ok"})
 
+    title = "Self-Play Viewer" if self_play else "Trained Model"
+
     async def api_match(req):
-        return aiohttp.web.json_response({"tick": env.tick_count(), "title": "Trained Model", "status": "running"})
+        return aiohttp.web.json_response({"tick": env.tick_count(), "title": title, "status": "running"})
 
     async def api_config(req):
         with open(config_path) as f:
@@ -110,9 +116,17 @@ async def run(config_path, model_path, port, tick_rate, dummy_ai=False):
 
     try:
         while True:
-            obs_0 = flatten_obs(obs_dict[0])
-            action_0, _ = model.predict(obs_0, deterministic=True)
-            actions = {0: action_0.tolist()}
+            actions = {}
+            if self_play:
+                for agent_id in range(num_agents):
+                    if agent_id in obs_dict:
+                        obs_i = flatten_obs(obs_dict[agent_id])
+                        action_i, _ = model.predict(obs_i, deterministic=True)
+                        actions[agent_id] = [float(a) for a in action_i.tolist()]
+            else:
+                obs_0 = flatten_obs(obs_dict[0])
+                action_0, _ = model.predict(obs_0, deterministic=True)
+                actions = {0: [float(a) for a in action_0.tolist()]}
 
             obs_dict, rewards, terms, truncs, infos = env.step(actions)
             tick_count += 1
@@ -148,11 +162,12 @@ def main():
     p.add_argument("--port", type=int, default=3000)
     p.add_argument("--tick-rate", type=int, default=16)
     p.add_argument("--dummy-ai", action="store_true", help="Use dummy AI opponent")
+    p.add_argument("--self-play", action="store_true", help="Model controls both sides")
     args = p.parse_args()
 
     signal.signal(signal.SIGINT, lambda *_: (unregister_session(), sys.exit(0)))
     signal.signal(signal.SIGTERM, lambda *_: (unregister_session(), sys.exit(0)))
-    asyncio.run(run(args.config, args.model, args.port, args.tick_rate, args.dummy_ai))
+    asyncio.run(run(args.config, args.model, args.port, args.tick_rate, args.dummy_ai, args.self_play))
 
 
 if __name__ == "__main__":

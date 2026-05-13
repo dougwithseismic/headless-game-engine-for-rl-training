@@ -17,7 +17,7 @@ Typical usage::
 
 Output format (.npz):
     observations : float32 array [N, obs_size]
-    actions      : float32 array [N, action_size]
+    actions      : int64 array   [N, num_heads]
     episode_starts : bool array  [N]
     rewards      : float32 array [N]
 """
@@ -143,7 +143,7 @@ def collect_demonstrations(
         os.makedirs(out_dir, exist_ok=True)
 
     obs_arr = np.array(all_obs, dtype=np.float32)
-    act_arr = np.array(all_actions, dtype=np.float32)
+    act_arr = np.array(all_actions, dtype=np.int64)
     starts_arr = np.array(all_episode_starts, dtype=bool)
     rewards_arr = np.array(all_rewards, dtype=np.float32)
 
@@ -172,14 +172,9 @@ def collect_demonstrations(
     }
 
 
-def _bins_to_continuous(action: list[float]) -> list[float]:
-    """Convert raw engine action values to continuous [-1, 1] for the gym."""
-    if len(action) < 2:
-        return action
-    return [
-        max(-1.0, min(1.0, action[0] / 5.5 - 1.0)),  # move: bin -> continuous
-        1.0 if action[1] > 0.5 else -1.0,              # shoot: binary
-    ]
+def _action_to_discrete(action: list[float]) -> list[int]:
+    """Convert raw engine float actions to discrete integer indices."""
+    return [int(round(a)) for a in action]
 
 
 def collect_demonstrations_native(
@@ -264,8 +259,8 @@ def collect_demonstrations_native(
             obs_arr = np.array(obs_flat, dtype=np.float32)
 
             all_obs.append(obs_arr)
-            continuous_action = _bins_to_continuous(agent_action)
-            all_actions.append(np.array(continuous_action, dtype=np.float32))
+            discrete_action = _action_to_discrete(agent_action)
+            all_actions.append(np.array(discrete_action, dtype=np.int64))
             all_episode_starts.append(step == 0)
 
             reward = rewards.get(agent_id, 0.0)
@@ -289,7 +284,7 @@ def collect_demonstrations_native(
         os.makedirs(out_dir, exist_ok=True)
 
     obs_arr = np.array(all_obs, dtype=np.float32)
-    act_arr = np.array(all_actions, dtype=np.float32)
+    act_arr = np.array(all_actions, dtype=np.int64)
     starts_arr = np.array(all_episode_starts, dtype=bool)
     rewards_arr = np.array(all_rewards, dtype=np.float32)
 

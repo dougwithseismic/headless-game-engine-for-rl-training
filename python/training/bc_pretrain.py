@@ -1,26 +1,23 @@
-"""Behavioral cloning pre-trainer.
+"""Behavioral cloning pre-trainer (multi-head classification).
 
-Loads demonstration data (.npz files from ``bc_collector``), trains an
-SB3-compatible MlpPolicy via supervised learning, and saves in two formats:
+Loads demonstration data (.npz files from ``bc_collector``), trains a
+multi-head classification network via supervised learning, and saves as a
+standalone ``.pt`` checkpoint for KL anchor reference.
 
-1. **SB3-compatible .zip** -- ``PPO.load()`` can resume RL training from
-   the BC-initialised weights.
-2. **Standalone .pt** -- lightweight reference copy for the KL anchor
-   callback to constrain policy drift during fine-tuning.
+Each action head is a separate classification branch:
+  ``Linear(hidden_dim, n_i)`` where ``n_i`` is the branch cardinality.
+Loss is the sum of per-branch cross-entropy losses.
 
-The network architecture mirrors SB3's default ``MlpPolicy``:
-``Sequential(Linear, Tanh, Linear, Tanh)`` with a separate action head.
+The feature extractor mirrors SB3's default ``MlpPolicy``:
+``Sequential(Linear, Tanh, Linear, Tanh)``.
 The default hidden sizes ``(64, 64)`` match SB3's default ``net_arch``.
 
 Typical usage::
 
     from training.bc_pretrain import BCTrainer
 
-    trainer = BCTrainer(obs_dim=116, act_dim=5)
+    trainer = BCTrainer(obs_dim=116, branch_sizes=[12, 2, 2, 3])
     stats = trainer.train("data/demos.npz", epochs=50)
-
-    # Save for PPO.load() warm-start
-    trainer.save_as_sb3("runs/bc_model", env)
 
     # Save standalone reference for KL anchor
     trainer.save_reference("runs/bc_ref.pt")
@@ -35,18 +32,19 @@ from torch.utils.data import DataLoader, TensorDataset
 
 
 class BCTrainer:
-    """Train a policy network via behavioral cloning on expert demonstrations.
+    """Train a multi-head classification network via behavioral cloning.
 
-    The feature extractor and action head are structured to match SB3's
-    ``MlpPolicy`` so that trained weights can be copied directly into a
-    PPO model via :meth:`save_as_sb3`.
+    Each action head is a separate ``Linear(hidden_dim, n_i)`` branch.
+    Training uses per-branch cross-entropy loss.
 
     Parameters
     ----------
     obs_dim : int
         Observation vector dimensionality.
+    branch_sizes : list[int]
+        Cardinality of each discrete action head (e.g. ``[12, 2, 2, 3]``).
     act_dim : int
-        Action vector dimensionality.
+        Deprecated, kept for backwards compat. Ignored when branch_sizes given.
     lr : float
         Adam learning rate (default 1e-3).
     hidden_sizes : tuple[int, ...]
@@ -59,19 +57,26 @@ class BCTrainer:
     def __init__(
         self,
         obs_dim: int,
-        act_dim: int,
+        act_dim: int = 0,
         lr: float = 1e-3,
         hidden_sizes: tuple[int, ...] = (64, 64),
         device: str = "cpu",
+        branch_sizes: list[int] | None = None,
     ):
         self.obs_dim = obs_dim
-        self.act_dim = act_dim
         self.device = device
         self.lr = lr
         self.hidden_sizes = hidden_sizes
 
-        # Build a feature extractor matching SB3's MlpPolicy architecture:
-        #   Sequential(Linear(obs_dim, h0), Tanh, Linear(h0, h1), Tanh, ...)
+        if branch_sizes is not None:
+            self.branch_sizes = list(branch_sizes)
+        elif act_dim > 0:
+            self.branch_sizes = [act_dim]
+        else:
+            raise ValueError("Must provide branch_sizes or act_dim > 0")
+
+        self.act_dim = len(self.branch_sizes)
+
         layers: list[nn.Module] = []
         in_dim = obs_dim
         for h in hidden_sizes:
@@ -80,15 +85,23 @@ class BCTrainer:
             in_dim = h
         self.feature_extractor = nn.Sequential(*layers).to(device)
 
-        # Action head: Linear(last_hidden -> act_dim)
-        # Matches SB3's `action_net` layer.
-        self.action_head = nn.Linear(in_dim, act_dim).to(device)
+        self.action_heads = nn.ModuleList([
+            nn.Linear(in_dim, n) for n in self.branch_sizes
+        ]).to(device)
 
         self.optimizer = torch.optim.Adam(
             list(self.feature_extractor.parameters())
-            + list(self.action_head.parameters()),
+            + list(self.action_heads.parameters()),
             lr=lr,
         )
+
+    def _compute_loss(self, features: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """Sum of per-branch cross-entropy losses."""
+        total = torch.tensor(0.0, device=features.device)
+        for i, head in enumerate(self.action_heads):
+            logits = head(features)
+            total = total + nn.functional.cross_entropy(logits, targets[:, i])
+        return total
 
     def train(
         self,
@@ -118,9 +131,8 @@ class BCTrainer:
         """
         data = np.load(demos_path)
         obs = torch.tensor(data["observations"], dtype=torch.float32)
-        acts = torch.tensor(data["actions"], dtype=torch.float32)
+        acts = torch.tensor(data["actions"], dtype=torch.long)
 
-        # Train/val split
         n = len(obs)
         n_val = int(n * val_split)
         n_train = n - n_val
@@ -136,9 +148,8 @@ class BCTrainer:
         stats: dict = {"train_losses": [], "val_losses": []}
 
         for epoch in range(epochs):
-            # --- Train ---
             self.feature_extractor.train()
-            self.action_head.train()
+            self.action_heads.train()
             epoch_loss = 0.0
             n_batches = 0
 
@@ -147,8 +158,7 @@ class BCTrainer:
                 batch_acts = batch_acts.to(self.device)
 
                 features = self.feature_extractor(batch_obs)
-                pred_acts = self.action_head(features)
-                loss = nn.functional.mse_loss(pred_acts, batch_acts)
+                loss = self._compute_loss(features, batch_acts)
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -160,9 +170,8 @@ class BCTrainer:
             avg_train = epoch_loss / max(n_batches, 1)
             stats["train_losses"].append(avg_train)
 
-            # --- Validate ---
             self.feature_extractor.eval()
-            self.action_head.eval()
+            self.action_heads.eval()
             val_loss = 0.0
             n_val_batches = 0
 
@@ -171,8 +180,7 @@ class BCTrainer:
                     batch_obs = batch_obs.to(self.device)
                     batch_acts = batch_acts.to(self.device)
                     features = self.feature_extractor(batch_obs)
-                    pred_acts = self.action_head(features)
-                    val_loss += nn.functional.mse_loss(pred_acts, batch_acts).item()
+                    val_loss += self._compute_loss(features, batch_acts).item()
                     n_val_batches += 1
 
             avg_val = val_loss / max(n_val_batches, 1)
@@ -191,7 +199,7 @@ class BCTrainer:
         return stats
 
     def predict(self, obs: np.ndarray) -> np.ndarray:
-        """Predict action from observation.
+        """Predict action indices from observation (argmax per branch).
 
         Parameters
         ----------
@@ -202,11 +210,11 @@ class BCTrainer:
         Returns
         -------
         np.ndarray
-            Predicted action(s). Shape ``(act_dim,)`` for single input,
-            ``(batch, act_dim)`` for batch input.
+            Integer action indices. Shape ``(num_heads,)`` for single input,
+            ``(batch, num_heads)`` for batch input.
         """
         self.feature_extractor.eval()
-        self.action_head.eval()
+        self.action_heads.eval()
 
         with torch.no_grad():
             obs_t = torch.tensor(obs, dtype=torch.float32).to(self.device)
@@ -214,9 +222,10 @@ class BCTrainer:
             if single:
                 obs_t = obs_t.unsqueeze(0)
             features = self.feature_extractor(obs_t)
-            acts = self.action_head(features)
+            indices = [head(features).argmax(dim=-1) for head in self.action_heads]
+            acts = torch.stack(indices, dim=-1)
 
-        result = acts.cpu().numpy()
+        result = acts.cpu().numpy().astype(np.int64)
         if single:
             result = result.squeeze(0)
         return result
@@ -236,9 +245,10 @@ class BCTrainer:
         torch.save(
             {
                 "feature_extractor": self.feature_extractor.state_dict(),
-                "action_head": self.action_head.state_dict(),
+                "action_heads": self.action_heads.state_dict(),
                 "obs_dim": self.obs_dim,
                 "act_dim": self.act_dim,
+                "branch_sizes": self.branch_sizes,
                 "hidden_sizes": self.hidden_sizes,
             },
             path,
@@ -265,92 +275,57 @@ class BCTrainer:
         hidden_sizes = checkpoint.get("hidden_sizes", (64, 64))
         if isinstance(hidden_sizes, list):
             hidden_sizes = tuple(hidden_sizes)
+
+        branch_sizes = checkpoint.get("branch_sizes")
+        if branch_sizes is None:
+            branch_sizes = [checkpoint["act_dim"]]
+
         trainer = cls(
             obs_dim=checkpoint["obs_dim"],
-            act_dim=checkpoint["act_dim"],
             hidden_sizes=hidden_sizes,
             device=device,
+            branch_sizes=branch_sizes,
         )
         trainer.feature_extractor.load_state_dict(checkpoint["feature_extractor"])
-        trainer.action_head.load_state_dict(checkpoint["action_head"])
+
+        if "action_heads" in checkpoint:
+            trainer.action_heads.load_state_dict(checkpoint["action_heads"])
+        elif "action_head" in checkpoint:
+            if len(trainer.action_heads) == 1:
+                trainer.action_heads[0].load_state_dict(checkpoint["action_head"])
+            else:
+                print("WARNING: legacy single-head checkpoint, only loading feature extractor")
+
         return trainer
 
     def save_as_sb3(self, output_path: str, env) -> str:
-        """Save as SB3-compatible PPO model.
-
-        Creates a PPO instance with a matching ``net_arch``, copies the
-        BC-trained weights into the policy and value networks, and saves
-        via ``model.save()``. The resulting ``.zip`` can be loaded with
-        ``PPO.load()`` and training can resume immediately.
-
-        Parameters
-        ----------
-        output_path : str
-            Path for the ``.zip`` file (without extension).
-        env
-            A Gymnasium environment instance (needed for PPO
-            initialisation to infer observation/action spaces).
-
-        Returns
-        -------
-        str
-            The *output_path* argument (for chaining).
-        """
+        """Transfer BC weights into an SB3 PPO model and save as .zip."""
         from stable_baselines3 import PPO
 
-        # Create a fresh PPO with matching architecture.
-        # net_arch must match hidden_sizes so the Sequential layers align.
-        model = PPO(
-            "MlpPolicy",
-            env,
-            policy_kwargs={"net_arch": list(self.hidden_sizes)},
-            verbose=0,
-        )
+        model = PPO("MlpPolicy", env, verbose=0)
+        policy = model.policy
 
-        sb3_policy = model.policy
+        with torch.no_grad():
+            # Feature extractor → mlp_extractor.policy_net
+            # BC: Sequential(Linear, Tanh, Linear, Tanh)
+            # SB3: Sequential(Linear, Tanh, Linear, Tanh) at policy_net.0, policy_net.2
+            bc_layers = [m for m in self.feature_extractor if isinstance(m, nn.Linear)]
+            sb3_layers = [m for m in policy.mlp_extractor.policy_net if isinstance(m, nn.Linear)]
+            for bc_l, sb3_l in zip(bc_layers, sb3_layers):
+                sb3_l.weight.copy_(bc_l.weight)
+                sb3_l.bias.copy_(bc_l.bias)
 
-        # -----------------------------------------------------------------
-        # SB3 MlpPolicy internal structure (with net_arch=[64, 64]):
-        #
-        #   mlp_extractor.policy_net = Sequential(
-        #       (0): Linear(obs_dim, 64)
-        #       (1): Tanh()
-        #       (2): Linear(64, 64)
-        #       (3): Tanh()
-        #   )
-        #   action_net = Linear(64, act_dim)
-        #
-        # Our BC model mirrors this exactly:
-        #   feature_extractor = Sequential(
-        #       (0): Linear(obs_dim, 64)
-        #       (1): Tanh()
-        #       (2): Linear(64, 64)
-        #       (3): Tanh()
-        #   )
-        #   action_head = Linear(64, act_dim)
-        #
-        # State dict keys are identical (0.weight, 0.bias, 2.weight, 2.bias)
-        # because Tanh layers have no parameters.
-        # -----------------------------------------------------------------
-
-        # Copy feature extractor weights -> SB3 policy_net
-        sb3_policy.mlp_extractor.policy_net.load_state_dict(
-            self.feature_extractor.state_dict()
-        )
-
-        # Copy action head weights -> SB3 action_net
-        sb3_policy.action_net.load_state_dict(
-            self.action_head.state_dict()
-        )
-
-        # Also copy to value network (warm-starts the value function)
-        sb3_policy.mlp_extractor.value_net.load_state_dict(
-            self.feature_extractor.state_dict()
-        )
+            # Action heads → action_net (concatenated)
+            # SB3 action_net is single Linear(hidden, sum(branch_sizes))
+            # Our action_heads are [Linear(hidden, n_i) for n_i in branch_sizes]
+            weights = torch.cat([h.weight for h in self.action_heads], dim=0)
+            biases = torch.cat([h.bias for h in self.action_heads], dim=0)
+            policy.action_net.weight.copy_(weights)
+            policy.action_net.bias.copy_(biases)
 
         model.save(output_path)
-        print(f"Saved SB3-compatible model to {output_path}.zip")
-        return output_path
+        print(f"  Saved SB3 model: {output_path}.zip")
+        return f"{output_path}.zip"
 
 
 # ---------------------------------------------------------------------------
@@ -376,10 +351,17 @@ if __name__ == "__main__":
         help="Observation vector dimensionality.",
     )
     parser.add_argument(
+        "--branch-sizes",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Cardinality of each discrete action head (e.g. 12 2 2 3).",
+    )
+    parser.add_argument(
         "--act-dim",
         type=int,
-        required=True,
-        help="Action vector dimensionality.",
+        default=0,
+        help="(Deprecated) Action vector dimensionality. Use --branch-sizes instead.",
     )
     parser.add_argument(
         "--epochs",
@@ -407,35 +389,23 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-sb3",
         default=None,
-        help="Path for the SB3-compatible .zip (without extension).",
-    )
-    parser.add_argument(
-        "--config",
-        default=None,
-        help="Path to env config (required for --output-sb3).",
-    )
-    parser.add_argument(
-        "--scenario",
-        default="cs_lite",
-        help="Scenario name (required for --output-sb3).",
-    )
-    parser.add_argument(
-        "--phase",
-        type=int,
-        default=None,
-        help="Curriculum phase (required for --output-sb3).",
+        help="(Deprecated) Not supported for MultiDiscrete.",
     )
 
     args = parser.parse_args()
+
+    if args.branch_sizes is None and args.act_dim <= 0:
+        parser.error("Must provide --branch-sizes or --act-dim")
 
     trainer = BCTrainer(
         obs_dim=args.obs_dim,
         act_dim=args.act_dim,
         lr=args.lr,
+        branch_sizes=args.branch_sizes,
     )
 
     print(f"Training BC policy from {args.demos}")
-    print(f"  obs_dim={args.obs_dim}, act_dim={args.act_dim}")
+    print(f"  obs_dim={args.obs_dim}, branch_sizes={trainer.branch_sizes}")
     print(f"  epochs={args.epochs}, batch_size={args.batch_size}, lr={args.lr}")
     print()
 
@@ -452,17 +422,7 @@ if __name__ == "__main__":
         print(f"Saved reference model to {args.output_ref}")
 
     if args.output_sb3:
-        if args.config is None:
-            parser.error("--config is required when using --output-sb3")
-
-        from training.ppo_trainer import _import_gym_class
-
-        GymClass = _import_gym_class(args.scenario)
-        env = GymClass(
-            config_path=args.config,
-            scenario=args.scenario,
-            phase=args.phase,
+        print(
+            "WARNING: --output-sb3 is not supported for MultiDiscrete. "
+            "Use PPO training from scratch."
         )
-        os.makedirs(os.path.dirname(args.output_sb3) or ".", exist_ok=True)
-        trainer.save_as_sb3(args.output_sb3, env)
-        env.close()

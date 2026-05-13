@@ -29,7 +29,8 @@ def merge_reward_config(base_config_path: str, reward_overrides: dict, output_pa
     return output_path
 
 
-def run_candidate(scenario, config_path, bc_model, steps, n_envs, eval_freq, run_name):
+def run_candidate(scenario, config_path, bc_model, steps, n_envs, eval_freq, run_name,
+                   self_play=False, swap_interval=500_000):
     """Run a single training candidate and return behavioral metrics."""
     from training.ppo_trainer import PPOTrainer
 
@@ -47,6 +48,9 @@ def run_candidate(scenario, config_path, bc_model, steps, n_envs, eval_freq, run
         track_behavior=True,
         n_steps=4096,
         batch_size=256,
+        self_play=self_play,
+        swap_interval=swap_interval,
+        scripted_warmup=0,
     )
 
     final_model = trainer.train()
@@ -54,7 +58,8 @@ def run_candidate(scenario, config_path, bc_model, steps, n_envs, eval_freq, run
     # Read metrics from eval logs
     eval_path = os.path.join(trainer.run_dir, "eval_logs", "evaluations.npz")
     metrics = {"reward": 0.0, "accuracy": 0.0, "kills_per_ep": 0.0,
-               "deaths_per_ep": 0.0, "shoot_rate": 0.0, "damage_dealt_per_ep": 0.0}
+               "deaths_per_ep": 0.0, "shoot_rate": 0.0, "damage_dealt_per_ep": 0.0,
+               "win_rate": 0.0}
 
     if os.path.exists(eval_path):
         data = np.load(eval_path)
@@ -76,6 +81,7 @@ def run_candidate(scenario, config_path, bc_model, steps, n_envs, eval_freq, run
                 "behavior/deaths_per_ep": "deaths_per_ep",
                 "behavior/shoot_rate": "shoot_rate",
                 "behavior/damage_dealt_per_ep": "damage_dealt_per_ep",
+                "behavior/win_rate": "win_rate",
             }
             for tb_tag, key in tag_map.items():
                 if tb_tag in tags:
@@ -97,6 +103,8 @@ def main():
     p.add_argument("--n-envs", type=int, default=32)
     p.add_argument("--eval-freq", type=int, default=100_000)
     p.add_argument("--bc-model", default=None, help="BC model to warm-start from")
+    p.add_argument("--self-play", action="store_true", help="Enable self-play training")
+    p.add_argument("--swap-interval", type=int, default=500_000, help="Self-play swap interval")
     p.add_argument("--output", default="data/reward_search_results.json")
     args = p.parse_args()
 
@@ -110,7 +118,8 @@ def main():
         print(f"No .json files found in {args.reward_dir}")
         sys.exit(1)
 
-    print(f"=== Reward Search: {len(reward_files)} candidates, {args.steps:,} steps each ===")
+    mode = "Self-Play" if args.self_play else "vs Scripted AI"
+    print(f"=== Reward Search ({mode}): {len(reward_files)} candidates, {args.steps:,} steps each ===")
     print()
 
     results = []
@@ -137,6 +146,8 @@ def main():
             n_envs=args.n_envs,
             eval_freq=args.eval_freq,
             run_name=f"search_{candidate_name}",
+            self_play=args.self_play,
+            swap_interval=args.swap_interval,
         )
         elapsed = time.time() - t0
 
@@ -150,10 +161,10 @@ def main():
         print()
 
     # Print comparison table
-    print("=" * 90)
+    print("=" * 100)
     print(f"{'Candidate':<28} {'Accuracy':>10} {'Kills/ep':>10} {'Deaths/ep':>10} "
-          f"{'Shoot%':>8} {'Reward':>10}")
-    print("-" * 90)
+          f"{'Win%':>8} {'Shoot%':>8} {'Reward':>10}")
+    print("-" * 100)
 
     best_acc = max(results, key=lambda r: r["accuracy"])
     best_kills = max(results, key=lambda r: r["kills_per_ep"])
@@ -167,10 +178,10 @@ def main():
         marker = f"  <- {', '.join(markers)}" if markers else ""
 
         print(f"{r['name']:<28} {r['accuracy']:>9.2%} {r['kills_per_ep']:>10.1f} "
-              f"{r['deaths_per_ep']:>10.1f} {r['shoot_rate']:>7.1%} "
+              f"{r['deaths_per_ep']:>10.1f} {r['win_rate']:>7.1%} {r['shoot_rate']:>7.1%} "
               f"{r['reward']:>+10.1f}{marker}")
 
-    print("=" * 90)
+    print("=" * 100)
 
     # Save results
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)

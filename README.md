@@ -200,6 +200,51 @@ Things that didn't work:
 - **LSTM without BC warm-start** — random LSTM weights can't discover aim from scratch
 - **Self-play too early** — two bad agents reinforcing each other's bad habits
 
+## Recurrent Memory Benchmarks
+
+For strategic game AI (CS2, AoE2), agents need cross-round memory — tracking bomb locations, enemy scouting patterns, economy state across hundreds of timesteps. We benchmarked LSTM and GRU memory architectures against the MLP baseline to understand the cost.
+
+### Results
+
+Benchmarked on cs_lite (3D FPS, 32 parallel envs, obs=229, act=4 heads) and a zero-cost synthetic env (obs=64, act=8) to isolate training loop overhead:
+
+| Architecture | cs_lite (real env) | Synthetic (zero-cost env) |
+|---|---|---|
+| MLP | 13,700 steps/sec | 31,922 steps/sec |
+| LSTM (hidden=256) | 1,833 steps/sec (7.5x slower) | 686 steps/sec (46x slower) |
+| GRU (hidden=256) | 1,763 steps/sec (7.8x slower) | 750 steps/sec (43x slower) |
+
+GRU has ~30% fewer parameters than LSTM (2 gates vs 3), but performs within noise of LSTM in practice. On the synthetic env where env cost is zero, the slowdown balloons to 40-46x — confirming the bottleneck is entirely in the training loop, not the RNN cell.
+
+### Why GRU doesn't help
+
+The bottleneck is sb3-contrib's `RecurrentActorCriticPolicy._process_sequence()`, which processes rollout sequences step-by-step in a Python loop. Both LSTM and GRU hit the same wall: sequential dispatch overhead dominates, making the gate count irrelevant.
+
+### What this means for training
+
+| Run type | MLP | LSTM/GRU |
+|---|---|---|
+| 10M step phase | 12 min | ~89 min |
+| 30M self-play run | 36 min | ~4.4 hours |
+| 45M+ full curriculum | ~1 hour | ~7 hours |
+
+7 hours for a full curriculum is overnight territory — still very runnable. But iteration speed during research (reward tuning, obs space design) takes a real hit.
+
+### Reproducing
+
+```bash
+cd python
+python scripts/bench_memory.py
+```
+
+### Implications
+
+If recurrent memory at speed becomes necessary (e.g., long self-play population training), the path forward is Sample Factory — its async architecture with PackedSequence BPTT addresses exactly the sequential rollout bottleneck that sb3-contrib can't avoid. The `--memory` flag supports `none`, `lstm`, and `gru` so architecture can be A/B tested without code changes:
+
+```bash
+python scripts/train.py --scenario cs_lite --config configs/cs_lite/cs_lite.json --memory gru --memory-hidden-size 512
+```
+
 ## Future Direction
 
 See [docs/eureka-direction.md](docs/eureka-direction.md) for the full plan to automate reward function design using LLM-guided search, following NVIDIA Eureka's framework applied to FPS game agents.

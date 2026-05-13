@@ -210,8 +210,9 @@ class PPOTrainer:
         patience: int = 15,
         run_dir: str | None = None,
         dummy_vec_env: bool = False,
-        lstm: bool = False,
-        lstm_hidden_size: int = 256,
+        memory: str = "none",
+        memory_hidden_size: int = 256,
+        memory_sequence_length: int | None = None,
         track_behavior: bool = True,
     ):
         self.scenario = scenario
@@ -254,8 +255,11 @@ class PPOTrainer:
         self.auto_stop = auto_stop
         self.patience = patience
         self.dummy_vec_env = dummy_vec_env
-        self.lstm = lstm
-        self.lstm_hidden_size = lstm_hidden_size
+        if memory not in ("none", "lstm", "gru"):
+            raise ValueError(f"memory must be 'none', 'lstm', or 'gru', got {memory!r}")
+        self.memory = memory
+        self.memory_hidden_size = memory_hidden_size
+        self.memory_sequence_length = memory_sequence_length
         self.track_behavior = track_behavior
 
         # Resolve gym class from registry
@@ -315,8 +319,9 @@ class PPOTrainer:
             "kl_anchor": self.kl_anchor,
             "entropy_schedule": list(self.entropy_schedule) if self.entropy_schedule else None,
             "self_play": self.self_play,
-            "lstm": self.lstm,
-            "lstm_hidden_size": self.lstm_hidden_size if self.lstm else None,
+            "memory": self.memory,
+            "memory_hidden_size": self.memory_hidden_size if self.memory != "none" else None,
+            "memory_sequence_length": self.memory_sequence_length,
             "track_behavior": self.track_behavior,
         }
 
@@ -382,6 +387,7 @@ class PPOTrainer:
         if self.self_play:
             callbacks.append(SelfPlaySwapCallback(
                 train_env=vec_env,
+                eval_env=eval_env,
                 swap_interval=self.swap_interval,
                 scripted_warmup=self.scripted_warmup,
             ))
@@ -432,12 +438,16 @@ class PPOTrainer:
         )
 
         # Create or resume model
-        if self.lstm:
+        if self.memory in ("lstm", "gru"):
             if RecurrentPPO is None:
-                raise ImportError("sb3-contrib required for LSTM: pip install sb3-contrib")
+                raise ImportError("sb3-contrib required for recurrent memory: pip install sb3-contrib")
             AlgoClass = RecurrentPPO
-            policy_name = "MlpLstmPolicy"
-            policy_kwargs = {"lstm_hidden_size": self.lstm_hidden_size}
+            policy_kwargs = {"lstm_hidden_size": self.memory_hidden_size}
+            if self.memory == "gru":
+                from training.gru_policy import MlpGruPolicy
+                policy_name = MlpGruPolicy
+            else:
+                policy_name = "MlpLstmPolicy"
         else:
             AlgoClass = PPO
             policy_name = "MlpPolicy"
@@ -478,12 +488,13 @@ class PPOTrainer:
         print(f"  Scenario: {self.scenario}")
         print(f"  Config: {self.config_path}")
         print(f"  Phase: {self.phase}")
+        print(f"  Action space: {vec_env.action_space}")
         print(f"  Timesteps: {self.timesteps:,}")
         print(f"  Envs: {self.n_envs}")
         print(f"  KL anchor: {self.kl_anchor}")
         print(f"  Entropy schedule: {self.entropy_schedule}")
         print(f"  Self-play: {self.self_play}")
-        print(f"  LSTM: {self.lstm} (hidden={self.lstm_hidden_size})" if self.lstm else f"  LSTM: False")
+        print(f"  Memory: {self.memory} (hidden={self.memory_hidden_size})" if self.memory != "none" else "  Memory: none")
         print(f"  Run dir: {self.run_dir}")
 
         # Train
