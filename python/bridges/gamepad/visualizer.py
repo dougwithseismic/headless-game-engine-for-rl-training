@@ -167,6 +167,10 @@ DEMO_FNS = {
 # ---------------------------------------------------------------------------
 
 
+_HTML_BYTES = HTML_PATH.read_bytes()
+_SVG_BYTES = SVG_PATH.read_bytes()
+
+
 class GamepadServer:
     def __init__(self, port: int = 8765):
         self.port = port
@@ -176,9 +180,8 @@ class GamepadServer:
         self.tick = 0
         self.clients: set[websockets.WebSocketServerProtocol] = set()
         self._running = False
-        # User input override — axes/buttons set directly by the browser
         self._user_axes: dict[str, float] = {}
-        self._user_held_buttons: set[str] = set()  # persistent until release
+        self._user_held_buttons: set[str] = set()
         self._user_active_axes: set[str] = set()
 
     async def handler(self, ws: websockets.WebSocketServerProtocol):
@@ -228,19 +231,17 @@ class GamepadServer:
 
     async def process_request(self, connection, request: Request):
         if request.path in ("/", "/index.html"):
-            body = HTML_PATH.read_bytes()
             return Response(HTTPStatus.OK, "OK", websockets.Headers({
                 "Content-Type": "text/html; charset=utf-8",
-                "Content-Length": str(len(body)),
-            }), body)
+                "Content-Length": str(len(_HTML_BYTES)),
+            }), _HTML_BYTES)
 
         if request.path == "/controller.svg":
-            body = SVG_PATH.read_bytes()
             return Response(HTTPStatus.OK, "OK", websockets.Headers({
                 "Content-Type": "image/svg+xml",
-                "Content-Length": str(len(body)),
+                "Content-Length": str(len(_SVG_BYTES)),
                 "Cache-Control": "public, max-age=3600",
-            }), body)
+            }), _SVG_BYTES)
 
         if request.path == "/ws":
             return None
@@ -258,9 +259,8 @@ class GamepadServer:
             if targets:
                 self.pid.set_targets(targets)
 
-            current_axes = {
-                a.value: self.gamepad._state.axes[a] for a in Axis
-            }
+            gp_snap = self.gamepad.get_state()
+            current_axes = {a.value: gp_snap.axes[a] for a in Axis}
 
             # PID drives axes NOT actively controlled by the user
             pid_outputs = self.pid.update(current_axes)
@@ -276,10 +276,10 @@ class GamepadServer:
                     new_val = max(-1.0, min(1.0, new_val))
                 self.gamepad.set_axis(axis_name, new_val)
 
-            # User input overrides — applied directly, no PID
-            for axis_name, val in self._user_axes.items():
+            # User input overrides — atomic swap to avoid lost inputs
+            user_axes, self._user_axes = self._user_axes, {}
+            for axis_name, val in user_axes.items():
                 self.gamepad.set_axis(axis_name, val)
-            self._user_axes.clear()
 
             # Buttons: user holds persist, demo fills the rest
             for b in Button:

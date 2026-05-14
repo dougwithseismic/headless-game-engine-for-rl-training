@@ -109,19 +109,39 @@ Three memory-mapped pages, read via Python `mmap` + `ctypes`:
 
 **Python access:** Use `sim_info.py` pattern — `mmap.mmap(-1, size, "acpmf_physics")` mapped to ctypes structures.
 
-### 3.3 Control Output
+### 3.3 Control Output — BUILT
 
-**vgamepad** (Python library, emulates Xbox 360 via ViGEmBus driver):
+> **Status: Implemented.** The virtual gamepad abstraction is complete at `python/bridges/gamepad/`. See `README.md` in that directory for full usage docs.
+
+The gamepad system is a cross-platform Xbox 360 controller abstraction with swappable backends:
+
+- **`GamepadBackend` Protocol** — full Xbox 360 API: 6 axes (2 sticks + 2 triggers), 14 buttons, `set_axis()`/`set_button()`/`update()` cycle
+- **`MockGamepad`** (Mac/test) — records state history in a ring buffer, ASCII debug viz, no OS deps
+- **`VGamepadBackend`** (Windows) — real virtual Xbox 360 via ViGEmBus. Steam and all games see it as a plugged-in controller
+- **`GamepadPIDController`** — per-axis PID for smooth, human-like input ramping. Configurable gains per axis type (sticks vs triggers)
+- **Deadzone** — configurable (default 5%), rescales remaining range so full -1/+1 is still reachable
+- **`make_gamepad(backend="auto")`** factory — auto-detects OS, passes through kwargs including deadzone
+- **Browser visualizer** (`visualizer.py`) — real Xbox One controller SVG, interactive sticks/triggers/buttons, live telemetry feed, 7 demo modes, keyboard+mouse input, WebSocket at 60Hz
+- **30 pytest tests** covering deadzone, PID convergence, factory, integration loops
+
 ```python
-import vgamepad as vg
-gamepad = vg.VX360Gamepad()
-gamepad.left_joystick_float(x_value=steering, y_value=0.0)  # steering
-gamepad.right_trigger_float(value=throttle)                   # gas
-gamepad.left_trigger_float(value=brake)                       # brake
-gamepad.update()
+from bridges.gamepad.factory import make_pid_gamepad
+
+pad, pid = make_pid_gamepad(backend="auto", dt=1/60)
+pad.connect()
+pid.set_targets({"left_stick_x": 0.3, "right_trigger": 0.8})
+
+# PID output is a rate signal — integrate it
+current = {"left_stick_x": 0.0, "right_trigger": 0.0}
+outputs = pid.update(current)
+for axis, rate in outputs.items():
+    current[axis] = max(-1.0, min(1.0, current[axis] + rate * (1/60)))
+    pad.set_axis(axis, current[axis])
+pad.update()
+pad.disconnect()
 ```
 
-AC sees a real controller. No injection, no hacking, no anti-cheat concerns.
+On Windows with ViGEmBus, AC sees a real controller. No injection, no hacking, no anti-cheat concerns.
 
 ### 3.4 Timing
 
