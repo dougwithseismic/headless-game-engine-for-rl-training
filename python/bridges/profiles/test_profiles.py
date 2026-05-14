@@ -59,7 +59,7 @@ def test_gym_external_step():
 
 
 def test_gym_external_truncation():
-    bridge = make_template_bridge(obs_dim=4, act_dim=1, max_steps=5)
+    bridge = make_template_bridge(obs_dim=4, act_dim=1, )
     env = ExternalGameGym(bridge=bridge, max_steps=5)
     env.reset()
     for i in range(5):
@@ -96,7 +96,7 @@ def test_gym_external_custom_reward():
 
 def test_gym_external_episode_loop():
     """Full episode loop: reset -> step until done -> reset -> step."""
-    bridge = make_template_bridge(obs_dim=6, act_dim=2, max_steps=10)
+    bridge = make_template_bridge(obs_dim=6, act_dim=2, )
     env = ExternalGameGym(bridge=bridge, max_steps=10)
 
     for episode in range(3):

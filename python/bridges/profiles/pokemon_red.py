@@ -59,7 +59,6 @@ def make_pokemon_red_bridge(
     ticks_per_step: int = 24,
     headless: bool = True,
     speed: int = 0,
-    max_steps: int = 20_000,
     save_state_path: str | Path | None = None,
 ) -> GameBridge:
     """Create a GameBridge for Pokemon Red.
@@ -72,7 +71,6 @@ def make_pokemon_red_bridge(
             Higher values let button presses take effect (menus, movement animations).
         headless: Run without a display window.
         speed: Emulation speed (0 = uncapped, 1 = normal, 2+ = fast-forward).
-        max_steps: Maximum steps per episode.
         save_state_path: Path to a .state file to load as initial checkpoint.
             If None, the initial game state (after boot) is used.
     """
@@ -100,7 +98,6 @@ def make_pokemon_red_bridge(
         config=GameBridgeConfig(
             name="pokemon_red",
             timing=TimingConfig(policy=TimingPolicy.FREE_RUNNING),
-            max_steps=max_steps,
         ),
     )
 

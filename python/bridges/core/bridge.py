@@ -15,7 +15,6 @@ from bridges.core.timing import TimingConfig, TimingPolicy, StepTimer
 class GameBridgeConfig:
     name: str
     timing: TimingConfig
-    max_steps: int = 10_000
 
 
 class GameBridge:
@@ -38,14 +37,16 @@ class GameBridge:
         self.config = config
         self._timer = StepTimer(config.timing)
         self._connected = False
+        self._action_space = action_sink.info().action_space
+        self._observation_space = observation_source.info().observation_space
 
     @property
     def action_space(self) -> gym.Space:
-        return self.action_sink.info().action_space
+        return self._action_space
 
     @property
     def observation_space(self) -> gym.Space:
-        return self.observation_source.info().observation_space
+        return self._observation_space
 
     @property
     def connected(self) -> bool:

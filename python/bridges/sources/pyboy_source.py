@@ -45,12 +45,16 @@ class PyBoyObservationSource:
         self._render = render
         self._terminal = False
 
-        self._obs_dim = len(self._ram_features)
+        self._n_ram = len(self._ram_features)
+        self._screen_pixels = 0
         if include_screen:
-            # Game Boy screen: 160x144, downscaled, grayscale
-            h = 144 // screen_downscale
-            w = 160 // screen_downscale
-            self._obs_dim += h * w
+            self._screen_h = 144 // screen_downscale
+            self._screen_w = 160 // screen_downscale
+            self._screen_pixels = self._screen_h * self._screen_w
+        self._obs_dim = self._n_ram + self._screen_pixels
+        self._obs_buffer = np.zeros(self._obs_dim, dtype=np.float32)
+        self._ram_addresses = [f.address for f in self._ram_features]
+        self._ram_norms = np.array([f.normalize_max for f in self._ram_features], dtype=np.float32) if self._ram_features else None
 
     def info(self) -> ObservationSourceInfo:
         return ObservationSourceInfo(
@@ -75,34 +79,26 @@ class PyBoyObservationSource:
         if not alive:
             self._terminal = True
 
-        parts: list[np.ndarray] = []
+        buf = self._obs_buffer
 
-        if self._ram_features:
-            ram_values = np.array(
-                [self._host.read_memory(f.address) / f.normalize_max for f in self._ram_features],
-                dtype=np.float32,
-            )
-            parts.append(ram_values)
+        if self._ram_addresses:
+            mem = self._host.pyboy.memory
+            for i, addr in enumerate(self._ram_addresses):
+                buf[i] = mem[addr]
+            buf[:self._n_ram] /= self._ram_norms
 
         if self._include_screen:
             screen = self._host.screen_ndarray()
-            # Convert to grayscale if RGB
             if screen.ndim == 3:
                 gray = np.mean(screen[:, :, :3], axis=2)
             else:
                 gray = screen.astype(np.float32)
-            # Downscale via block averaging
-            h, w = gray.shape
-            nh = h // self._screen_downscale
-            nw = w // self._screen_downscale
-            gray = gray[:nh * self._screen_downscale, :nw * self._screen_downscale]
-            gray = gray.reshape(nh, self._screen_downscale, nw, self._screen_downscale).mean(axis=(1, 3))
-            parts.append((gray.flatten() / 255.0).astype(np.float32))
+            sh, sw = self._screen_h, self._screen_w
+            ds = self._screen_downscale
+            gray = gray[:sh * ds, :sw * ds].reshape(sh, ds, sw, ds).mean(axis=(1, 3))
+            buf[self._n_ram:] = gray.flatten() * (1.0 / 255.0)
 
-        if not parts:
-            return np.zeros(1, dtype=np.float32)
-
-        return np.concatenate(parts)
+        return buf
 
     def is_terminal(self) -> bool:
         return self._terminal
