@@ -15,6 +15,10 @@ models/
 data/
 python/data/
 
+# ROMs (never commit)
+*.gb
+*.gbc
+
 # Telemetry logs
 telemetry.jsonl
 python/telemetry.jsonl
