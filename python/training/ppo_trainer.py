@@ -214,6 +214,21 @@ class PPOTrainer:
         memory_hidden_size: int = 256,
         memory_sequence_length: int | None = None,
         track_behavior: bool = True,
+        # Dyna world model augmentation
+        dyna: bool = False,
+        dyna_n_models: int = 5,
+        dyna_hidden: int = 256,
+        dyna_n_layers: int = 3,
+        dyna_buffer_capacity: int = 500_000,
+        dyna_train_freq: int = 2048,
+        dyna_train_steps: int = 10,
+        dyna_batch_size: int = 256,
+        dyna_warmup: int = 5000,
+        dyna_lr: float = 1e-3,
+        dyna_shaping: bool = True,
+        dyna_shaping_coef: float = 0.1,
+        dyna_shaping_horizon: int = 3,
+        dyna_curiosity_coef: float = 0.01,
     ):
         self.scenario = scenario
         self.config_path = resolve_config(config_path)
@@ -261,6 +276,23 @@ class PPOTrainer:
         self.memory_hidden_size = memory_hidden_size
         self.memory_sequence_length = memory_sequence_length
         self.track_behavior = track_behavior
+
+        # Dyna world model
+        self.dyna = dyna
+        self.dyna_n_models = dyna_n_models
+        self.dyna_hidden = dyna_hidden
+        self.dyna_n_layers = dyna_n_layers
+        self.dyna_buffer_capacity = dyna_buffer_capacity
+        self.dyna_train_freq = dyna_train_freq
+        self.dyna_train_steps = dyna_train_steps
+        self.dyna_batch_size = dyna_batch_size
+        self.dyna_warmup = dyna_warmup
+        self.dyna_lr = dyna_lr
+        self.dyna_shaping = dyna_shaping
+        self.dyna_shaping_coef = dyna_shaping_coef
+        self.dyna_shaping_horizon = dyna_shaping_horizon
+        self.dyna_curiosity_coef = dyna_curiosity_coef
+        self._dyna_callback = None
 
         # Resolve gym class from registry
         self.gym_class = _import_gym_class(scenario)
@@ -323,6 +355,12 @@ class PPOTrainer:
             "memory_hidden_size": self.memory_hidden_size if self.memory != "none" else None,
             "memory_sequence_length": self.memory_sequence_length,
             "track_behavior": self.track_behavior,
+            "dyna": self.dyna,
+            "dyna_n_models": self.dyna_n_models if self.dyna else None,
+            "dyna_hidden": self.dyna_hidden if self.dyna else None,
+            "dyna_n_layers": self.dyna_n_layers if self.dyna else None,
+            "dyna_buffer_capacity": self.dyna_buffer_capacity if self.dyna else None,
+            "dyna_train_freq": self.dyna_train_freq if self.dyna else None,
         }
 
     def _build_callbacks(self, vec_env, eval_env) -> CallbackList:
@@ -397,6 +435,34 @@ class PPOTrainer:
                 eval_log_dir=os.path.join(self.run_dir, "eval_logs"),
                 patience=self.patience,
             ))
+
+        if self.dyna:
+            obs_dim = vec_env.observation_space.shape[0]
+            act_nvec = list(vec_env.action_space.nvec)
+            act_dim = len(act_nvec)
+
+            from training.dyna_callback import DynaCallback
+            dyna_cb = DynaCallback(
+                obs_dim=obs_dim,
+                act_dim=act_dim,
+                act_nvec=act_nvec,
+                buffer_capacity=self.dyna_buffer_capacity,
+                n_models=self.dyna_n_models,
+                hidden=self.dyna_hidden,
+                n_layers=self.dyna_n_layers,
+                model_train_freq=self.dyna_train_freq,
+                model_train_steps=self.dyna_train_steps,
+                model_batch_size=self.dyna_batch_size,
+                warmup_steps=self.dyna_warmup,
+                model_lr=self.dyna_lr,
+                reward_shaping=self.dyna_shaping,
+                shaping_coef=self.dyna_shaping_coef,
+                shaping_horizon=self.dyna_shaping_horizon,
+                curiosity_coef=self.dyna_curiosity_coef,
+                save_dir=os.path.join(self.run_dir, "world_model"),
+            )
+            callbacks.append(dyna_cb)
+            self._dyna_callback = dyna_cb
 
         return CallbackList(callbacks)
 
@@ -495,6 +561,7 @@ class PPOTrainer:
         print(f"  Entropy schedule: {self.entropy_schedule}")
         print(f"  Self-play: {self.self_play}")
         print(f"  Memory: {self.memory} (hidden={self.memory_hidden_size})" if self.memory != "none" else "  Memory: none")
+        print(f"  Dyna: {self.dyna}" + (f" ({self.dyna_n_models} models, {self.dyna_hidden}x{self.dyna_n_layers})" if self.dyna else ""))
         print(f"  Run dir: {self.run_dir}")
 
         # Train
@@ -510,6 +577,12 @@ class PPOTrainer:
         final_path = os.path.join(self.run_dir, "final_model")
         model.save(final_path)
         print(f"\n=== Done in {elapsed:.0f}s. Model: {final_path}.zip ===")
+
+        # Save world model if dyna was enabled
+        if self._dyna_callback is not None:
+            wm_dir = os.path.join(self.run_dir, "world_model")
+            self._dyna_callback.save_checkpoint(wm_dir)
+            print(f"  World model saved to {wm_dir}/")
 
         # Cleanup
         vec_env.close()

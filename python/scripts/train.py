@@ -74,6 +74,34 @@ def parse_args():
                    help="Disable behavior tracking during eval")
     p.add_argument("--bc-filter", default="all", choices=["all", "combat", "aim"],
                    help="Filter BC demos: all=every tick, combat=shooting ticks, aim=visible enemy ticks")
+
+    # Dyna world model augmentation
+    p.add_argument("--dyna", action="store_true",
+                   help="Enable Dyna-style world model augmentation")
+    p.add_argument("--dyna-n-models", type=int, default=5,
+                   help="Dynamics ensemble size (default: 5)")
+    p.add_argument("--dyna-hidden", type=int, default=256,
+                   help="Dynamics model hidden width (default: 256)")
+    p.add_argument("--dyna-n-layers", type=int, default=3,
+                   help="Dynamics model hidden layers (default: 3)")
+    p.add_argument("--dyna-buffer", type=int, default=500_000,
+                   help="Replay buffer capacity (default: 500000)")
+    p.add_argument("--dyna-train-freq", type=int, default=2048,
+                   help="Train dynamics every N steps (default: 2048)")
+    p.add_argument("--dyna-train-steps", type=int, default=10,
+                   help="Gradient steps per dynamics training (default: 10)")
+    p.add_argument("--dyna-warmup", type=int, default=5000,
+                   help="Minimum buffer size before training dynamics (default: 5000)")
+    p.add_argument("--dyna-lr", type=float, default=1e-3,
+                   help="Dynamics model learning rate (default: 1e-3)")
+    p.add_argument("--dyna-no-shaping", action="store_true",
+                   help="Disable reward shaping (only collect data + train model)")
+    p.add_argument("--dyna-shaping-coef", type=float, default=0.1,
+                   help="Reward shaping coefficient (default: 0.1)")
+    p.add_argument("--dyna-shaping-horizon", type=int, default=3,
+                   help="Imagination horizon for reward shaping (default: 3)")
+    p.add_argument("--dyna-curiosity-coef", type=float, default=0.01,
+                   help="Curiosity bonus coefficient (default: 0.01)")
     return p.parse_args()
 
 
@@ -126,6 +154,19 @@ def run_ppo(args):
         memory_hidden_size=args.memory_hidden_size,
         memory_sequence_length=args.memory_sequence_length,
         track_behavior=not args.no_track_behavior,
+        dyna=args.dyna,
+        dyna_n_models=args.dyna_n_models,
+        dyna_hidden=args.dyna_hidden,
+        dyna_n_layers=args.dyna_n_layers,
+        dyna_buffer_capacity=args.dyna_buffer,
+        dyna_train_freq=args.dyna_train_freq,
+        dyna_train_steps=args.dyna_train_steps,
+        dyna_warmup=args.dyna_warmup,
+        dyna_lr=args.dyna_lr,
+        dyna_shaping=not args.dyna_no_shaping,
+        dyna_shaping_coef=args.dyna_shaping_coef,
+        dyna_shaping_horizon=args.dyna_shaping_horizon,
+        dyna_curiosity_coef=args.dyna_curiosity_coef,
     )
     return trainer.train()
 
