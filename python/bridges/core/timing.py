@@ -28,15 +28,16 @@ class StepTimer:
     def wait(self) -> None:
         if self.config.policy == TimingPolicy.FREE_RUNNING:
             return
-        if self.config.policy == TimingPolicy.REAL_TIME:
-            now = time.monotonic()
-            if self._last_step_time is not None:
-                dt_target = 1.0 / self.config.target_hz
-                elapsed = now - self._last_step_time
-                remaining = dt_target - elapsed
-                if remaining > 0:
-                    time.sleep(remaining)
-            self._last_step_time = time.monotonic()
+        if self.config.policy == TimingPolicy.FIXED_STEP:
+            raise NotImplementedError("FIXED_STEP requires an external clock — not yet implemented")
+        now = time.monotonic()
+        if self._last_step_time is not None:
+            dt_target = 1.0 / self.config.target_hz
+            elapsed = now - self._last_step_time
+            remaining = dt_target - elapsed
+            if remaining > 0:
+                time.sleep(remaining)
+        self._last_step_time = time.monotonic()
 
     def reset(self) -> None:
         self._last_step_time = None

@@ -26,7 +26,6 @@ from bridges.resets.mock_reset import MockReset
 def make_template_bridge(
     obs_dim: int = 10,
     act_dim: int = 2,
-    max_steps: int = 1000,
     terminal_after: int | None = None,
 ) -> GameBridge:
     """Template game bridge with mock components.
@@ -50,6 +49,5 @@ def make_template_bridge(
         config=GameBridgeConfig(
             name="template_game",
             timing=TimingConfig(policy=TimingPolicy.FREE_RUNNING),
-            max_steps=max_steps,
         ),
     )
