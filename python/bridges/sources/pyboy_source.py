@@ -15,7 +15,7 @@ from dataclasses import dataclass
 import gymnasium as gym
 import numpy as np
 
-from bridges.core.obs_source import ObservationSourceInfo
+from bridges.core.obs_source import ObservationSourceInfo, FeatureGroup
 from bridges.emulators.pyboy_host import PyBoyHost
 
 
@@ -58,8 +58,12 @@ class PyBoyObservationSource:
 
     def info(self) -> ObservationSourceInfo:
         names = [f.name for f in self._ram_features]
+        groups = []
+        if self._ram_features:
+            groups.append(FeatureGroup("ram", 0, self._n_ram))
         if self._include_screen:
             names += [f"px_{i}" for i in range(self._screen_pixels)]
+            groups.append(FeatureGroup("screen", self._n_ram, self._screen_pixels))
         return ObservationSourceInfo(
             name="pyboy_ram" + ("_screen" if self._include_screen else ""),
             observation_space=gym.spaces.Box(
@@ -68,6 +72,7 @@ class PyBoyObservationSource:
             native_hz=None,
             platform="any",
             feature_names=names if names else None,
+            feature_groups=groups if groups else None,
         )
 
     def connect(self) -> None:

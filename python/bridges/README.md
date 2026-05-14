@@ -128,18 +128,45 @@ env = ExternalGameGym(bridge=bridge, reward_fn=reward_fn)
 env.feature_index  # also available on the gym
 ```
 
-For custom observation sources, return `feature_names` from `info()`:
+For custom observation sources, return `feature_names` and optionally `feature_groups` from `info()`:
 
 ```python
-class MyObsSource:
+from bridges.core.obs_source import ObservationSourceInfo, FeatureGroup
+
+class AoE2ObsSource:
     def info(self):
         return ObservationSourceInfo(
-            name="my_game",
-            observation_space=Box(0, 1, shape=(3,)),
+            name="aoe2",
+            observation_space=Box(0, 1, shape=(12,)),
             native_hz=None,
             platform="any",
-            feature_names=["gold", "food", "wood"],  # indices 0, 1, 2
+            feature_names=[
+                "gold", "food", "wood", "stone",       # resources (0-3)
+                "villagers", "military", "buildings",   # economy (4-6)
+                "enemy_mil", "enemy_dist", "enemy_age", # enemy (7-9)
+                "current_age", "pop_headroom",          # misc (10-11)
+            ],
+            feature_groups=[
+                FeatureGroup("resources", start=0, length=4),
+                FeatureGroup("economy", start=4, length=3),
+                FeatureGroup("enemy", start=7, length=3),
+                FeatureGroup("misc", start=10, length=2),
+            ],
         )
+```
+
+Then in reward functions:
+
+```python
+bridge = make_aoe2_bridge(...)
+idx = bridge.feature_index    # {"gold": 0, "food": 1, ...}
+groups = bridge.feature_groups  # {"resources": slice(0, 4), "economy": slice(4, 7), ...}
+
+def reward_fn(prev_obs, action, obs):
+    resources = obs[groups["resources"]]       # array of 4 values
+    total_resources = float(resources.sum())
+    military = obs[idx["military"]]            # single value
+    return total_resources + military * 2.0
 ```
 
 ## Save States
