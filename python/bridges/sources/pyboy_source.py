@@ -93,7 +93,10 @@ class PyBoyObservationSource:
         if self._ram_addresses:
             mem = self._host.pyboy.memory
             for i, addr in enumerate(self._ram_addresses):
-                buf[i] = mem[addr]
+                if 0xD000 <= addr < 0xE000:
+                    buf[i] = mem[1, addr]
+                else:
+                    buf[i] = mem[addr]
             buf[:self._n_ram] /= self._ram_norms
 
         if self._include_screen:
