@@ -258,10 +258,9 @@ def test_pokemon_red_profile():
         headless=True,
         speed=0,
         ticks_per_step=24,
-        max_steps=100,
     )
 
-    reward_fn = ExplorationReward(new_tile_reward=1.0)
+    reward_fn = ExplorationReward(bridge.feature_index, new_tile_reward=1.0)
     env = ExternalGameGym(bridge=bridge, reward_fn=reward_fn, max_steps=100)
 
     obs, _ = env.reset()

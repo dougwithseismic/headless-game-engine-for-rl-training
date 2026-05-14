@@ -57,6 +57,9 @@ class PyBoyObservationSource:
         self._ram_norms = np.array([f.normalize_max for f in self._ram_features], dtype=np.float32) if self._ram_features else None
 
     def info(self) -> ObservationSourceInfo:
+        names = [f.name for f in self._ram_features]
+        if self._include_screen:
+            names += [f"px_{i}" for i in range(self._screen_pixels)]
         return ObservationSourceInfo(
             name="pyboy_ram" + ("_screen" if self._include_screen else ""),
             observation_space=gym.spaces.Box(
@@ -64,6 +67,7 @@ class PyBoyObservationSource:
             ),
             native_hz=None,
             platform="any",
+            feature_names=names if names else None,
         )
 
     def connect(self) -> None:

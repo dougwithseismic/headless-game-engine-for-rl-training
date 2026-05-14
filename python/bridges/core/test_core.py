@@ -254,3 +254,57 @@ def test_bridge_reset_clears_terminal():
     # The mock source tracks step_count which resets on connect()
     obs = bridge.reset()
     assert obs.shape == (10,)
+
+
+# ---------------------------------------------------------------------------
+# Named observations (feature_index)
+# ---------------------------------------------------------------------------
+
+
+def test_bridge_feature_index_empty_by_default():
+    bridge = _make_bridge()
+    assert bridge.feature_index == {}
+
+
+def test_bridge_feature_index_from_named_source():
+    bridge = GameBridge(
+        action_sink=MockActionSink(),
+        observation_source=MockObservationSource(
+            observation_space=gym.spaces.Box(-1, 1, shape=(3,), dtype=np.float32),
+            feature_names=["gold", "food", "wood"],
+        ),
+        reset_strategy=MockReset(),
+        config=GameBridgeConfig(
+            name="named_test",
+            timing=TimingConfig(policy=TimingPolicy.FREE_RUNNING),
+        ),
+    )
+    assert bridge.feature_index == {"gold": 0, "food": 1, "wood": 2}
+
+
+def test_feature_index_used_in_reward():
+    bridge = GameBridge(
+        action_sink=MockActionSink(),
+        observation_source=MockObservationSource(
+            observation_space=gym.spaces.Box(-1, 1, shape=(3,), dtype=np.float32),
+            feature_names=["x", "y", "health"],
+        ),
+        reset_strategy=MockReset(),
+        config=GameBridgeConfig(
+            name="reward_test",
+            timing=TimingConfig(policy=TimingPolicy.FREE_RUNNING),
+        ),
+    )
+
+    idx = bridge.feature_index
+
+    def reward_fn(prev_obs, action, obs):
+        return float(obs[idx["health"]])
+
+    from glgym.gym_external import ExternalGameGym
+    env = ExternalGameGym(bridge=bridge, reward_fn=reward_fn, max_steps=10)
+    assert env.feature_index == {"x": 0, "y": 1, "health": 2}
+    obs, _ = env.reset()
+    obs, reward, _, _, _ = env.step(env.action_space.sample())
+    assert isinstance(reward, float)
+    env.close()

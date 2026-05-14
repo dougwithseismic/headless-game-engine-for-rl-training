@@ -38,7 +38,10 @@ class GameBridge:
         self._timer = StepTimer(config.timing)
         self._connected = False
         self._action_space = action_sink.info().action_space
-        self._observation_space = observation_source.info().observation_space
+        obs_info = observation_source.info()
+        self._observation_space = obs_info.observation_space
+        names = obs_info.feature_names
+        self._feature_index: dict[str, int] = {n: i for i, n in enumerate(names)} if names else {}
 
     @property
     def action_space(self) -> gym.Space:
@@ -47,6 +50,10 @@ class GameBridge:
     @property
     def observation_space(self) -> gym.Space:
         return self._observation_space
+
+    @property
+    def feature_index(self) -> dict[str, int]:
+        return self._feature_index
 
     @property
     def connected(self) -> bool:

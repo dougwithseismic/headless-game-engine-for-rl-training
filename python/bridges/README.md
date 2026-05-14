@@ -109,6 +109,39 @@ obs, reward, terminated, truncated, info = env.step(action)
 
 Reward functions are pluggable Python callables — no need to modify the game.
 
+## Named Observations
+
+Observation sources can declare feature names, making reward functions readable and resilient to reordering:
+
+```python
+# The bridge builds a feature_index from the source's feature names
+bridge = make_pokemon_red_bridge("pokemon_red.gb")
+idx = bridge.feature_index  # {"player_x": 0, "player_y": 1, "map_id": 2, "badges": 4, ...}
+
+# Reward function uses names instead of magic numbers
+def reward_fn(prev_obs, action, obs):
+    badges = int(obs[idx["badges"]] * 8)
+    new_x = obs[idx["player_x"]]
+    return float(badges) + float(abs(new_x - prev_obs[idx["player_x"]]))
+
+env = ExternalGameGym(bridge=bridge, reward_fn=reward_fn)
+env.feature_index  # also available on the gym
+```
+
+For custom observation sources, return `feature_names` from `info()`:
+
+```python
+class MyObsSource:
+    def info(self):
+        return ObservationSourceInfo(
+            name="my_game",
+            observation_space=Box(0, 1, shape=(3,)),
+            native_hz=None,
+            platform="any",
+            feature_names=["gold", "food", "wood"],  # indices 0, 1, 2
+        )
+```
+
 ## Save States
 
 For emulator-based games, save states enable instant deterministic resets:
