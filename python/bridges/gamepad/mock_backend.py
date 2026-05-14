@@ -9,9 +9,9 @@ from bridges.gamepad.protocol import (
     DEFAULT_DEADZONE,
     GamepadBackend,
     GamepadState,
-    STICK_AXES,
-    TRIGGER_AXES,
     apply_deadzone,
+    coerce_axis,
+    coerce_button,
 )
 
 
@@ -28,28 +28,6 @@ class TimestampedState:
         return f"TimestampedState(t={self.timestamp:.4f}, state={self.state})"
 
 
-def _coerce_axis(axis: Axis | str) -> Axis:
-    if isinstance(axis, Axis):
-        return axis
-    try:
-        return Axis(axis)
-    except ValueError:
-        raise ValueError(f"Unknown axis: {axis!r}. Valid: {[a.value for a in Axis]}")
-
-
-def _coerce_button(button: Button | str) -> Button:
-    if isinstance(button, Button):
-        return button
-    try:
-        return Button(button)
-    except ValueError:
-        raise ValueError(f"Unknown button: {button!r}. Valid: {[b.value for b in Button]}")
-
-
-def _clamp_axis(axis: Axis, value: float) -> float:
-    if axis in STICK_AXES:
-        return max(-1.0, min(1.0, value))
-    return max(0.0, min(1.0, value))
 
 
 class MockGamepadBackend:
@@ -81,12 +59,12 @@ class MockGamepadBackend:
 
     def set_axis(self, axis: Axis | str, value: float) -> None:
         self._require_connected()
-        axis = _coerce_axis(axis)
+        axis = coerce_axis(axis)
         self._state.axes[axis] = apply_deadzone(value, self.deadzone, axis)
 
     def set_button(self, button: Button | str, pressed: bool) -> None:
         self._require_connected()
-        button = _coerce_button(button)
+        button = coerce_button(button)
         self._state.buttons[button] = pressed
 
     def update(self) -> None:
@@ -162,8 +140,4 @@ class MockGamepadBackend:
             raise RuntimeError("Gamepad is not connected")
 
 
-# Alias for convenience
 MockGamepad = MockGamepadBackend
-
-# Structural check: ensure the class satisfies the protocol at import time.
-assert isinstance(MockGamepadBackend(), GamepadBackend)  # type: ignore[arg-type]

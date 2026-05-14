@@ -17,8 +17,9 @@ from bridges.gamepad.protocol import (
     DEFAULT_DEADZONE,
     GamepadBackend,
     GamepadState,
-    STICK_AXES,
     apply_deadzone,
+    coerce_axis,
+    coerce_button,
 )
 
 try:
@@ -60,26 +61,6 @@ def _resolve_button(button: Button) -> object:
     return getattr(vg.XUSB_BUTTON, attr_name)
 
 
-def _coerce_axis(axis: Axis | str) -> Axis:
-    if isinstance(axis, Axis):
-        return axis
-    try:
-        return Axis(axis)
-    except ValueError:
-        raise ValueError(f"Unknown axis: {axis!r}. Valid: {[a.value for a in Axis]}")
-
-
-def _coerce_button(button: Button | str) -> Button:
-    if isinstance(button, Button):
-        return button
-    try:
-        return Button(button)
-    except ValueError:
-        raise ValueError(f"Unknown button: {button!r}. Valid: {[b.value for b in Button]}")
-
-
-def _clamp(value: float, lo: float, hi: float) -> float:
-    return max(lo, min(hi, value))
 
 
 # ---------------------------------------------------------------------------
@@ -123,12 +104,12 @@ class VGamepadBackend:
 
     def set_axis(self, axis: Axis | str, value: float) -> None:
         self._require_connected()
-        axis = _coerce_axis(axis)
+        axis = coerce_axis(axis)
         self._state.axes[axis] = apply_deadzone(value, self.deadzone, axis)
 
     def set_button(self, button: Button | str, pressed: bool) -> None:
         self._require_connected()
-        button = _coerce_button(button)
+        button = coerce_button(button)
         self._state.buttons[button] = pressed
 
     def update(self) -> None:

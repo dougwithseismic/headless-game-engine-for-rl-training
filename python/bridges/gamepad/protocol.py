@@ -70,6 +70,24 @@ def apply_deadzone(value: float, deadzone: float, axis: Axis) -> float:
     return max(0.0, min(1.0, scaled))
 
 
+def coerce_axis(axis: Axis | str) -> Axis:
+    if isinstance(axis, Axis):
+        return axis
+    try:
+        return Axis(axis)
+    except ValueError:
+        raise ValueError(f"Unknown axis: {axis!r}. Valid: {[a.value for a in Axis]}")
+
+
+def coerce_button(button: Button | str) -> Button:
+    if isinstance(button, Button):
+        return button
+    try:
+        return Button(button)
+    except ValueError:
+        raise ValueError(f"Unknown button: {button!r}. Valid: {[b.value for b in Button]}")
+
+
 @dataclass
 class GamepadState:
     """Full snapshot of controller state — all axes and buttons."""

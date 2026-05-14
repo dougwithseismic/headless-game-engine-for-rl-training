@@ -37,9 +37,7 @@ DEFAULT_PRESETS: dict[str, PIDPreset] = {
     "right_trigger": TRIGGER_PRESET,
 }
 
-# Output ranges per axis type
-_STICK_AXES = {"left_stick_x", "left_stick_y", "right_stick_x", "right_stick_y"}
-_TRIGGER_AXES = {"left_trigger", "right_trigger"}
+from bridges.gamepad.protocol import STICK_AXES, TRIGGER_AXES
 
 
 # ---------------------------------------------------------------------------
@@ -147,22 +145,12 @@ class GamepadPIDController:
         self._targets: dict[str, float] = {}
 
         for axis, preset in merged.items():
-            # Output range is a rate (units/sec), not a position. Wide range
-            # lets the PID ramp fast; the axis value itself is clamped to
-            # [-1,1] or [0,1] at the gamepad layer.
-            if axis in _STICK_AXES:
-                out_min, out_max = -120.0, 120.0
-            elif axis in _TRIGGER_AXES:
-                out_min, out_max = -120.0, 120.0
-            else:
-                out_min, out_max = -120.0, 120.0
-
             self._controllers[axis] = PIDController(
                 kp=preset.kp,
                 ki=preset.ki,
                 kd=preset.kd,
-                output_min=out_min,
-                output_max=out_max,
+                output_min=-120.0,
+                output_max=120.0,
                 dt=dt,
             )
             self._targets[axis] = 0.0
