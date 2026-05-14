@@ -17,14 +17,15 @@ from bridges.emulators.pyboy_host import PyBoyHost, GAMEBOY_BUTTONS
 
 class PyBoyActionSink:
 
-    def __init__(self, host: PyBoyHost):
+    def __init__(self, host: PyBoyHost, buttons: tuple[str, ...] | None = None):
         self._host = host
+        self._buttons = buttons or GAMEBOY_BUTTONS
         self._held: set[str] = set()
 
     def info(self) -> ActionSinkInfo:
         return ActionSinkInfo(
             name="pyboy",
-            action_space=gym.spaces.MultiBinary(len(GAMEBOY_BUTTONS)),
+            action_space=gym.spaces.MultiBinary(len(self._buttons)),
             supports_continuous=False,
             supports_discrete=True,
             platform="any",
@@ -35,7 +36,7 @@ class PyBoyActionSink:
             self._host.start()
 
     def send(self, action: np.ndarray) -> None:
-        for i, button_name in enumerate(GAMEBOY_BUTTONS):
+        for i, button_name in enumerate(self._buttons):
             pressed = bool(action[i])
             was_held = button_name in self._held
 

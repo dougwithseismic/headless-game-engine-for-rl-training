@@ -69,6 +69,13 @@ class PyBoyHost:
             self._pyboy = None
 
     def tick(self, count: int = 1, render: bool = True) -> bool:
+        if self._speed > 0 and render and count > 1:
+            alive = True
+            for _ in range(count):
+                alive = self.pyboy.tick(count=1, render=True)
+                if not alive:
+                    break
+            return alive
         return self.pyboy.tick(count=count, render=render)
 
     def button(self, name: str, delay: int = 1) -> None:
@@ -80,11 +87,15 @@ class PyBoyHost:
     def button_release(self, name: str) -> None:
         self.pyboy.button_release(name)
 
-    def read_memory(self, address: int) -> int:
+    def read_memory(self, address: int, bank: int | None = None) -> int:
+        if bank is not None:
+            return self.pyboy.memory[bank, address]
+        if 0xD000 <= address < 0xE000:
+            return self.pyboy.memory[1, address]
         return self.pyboy.memory[address]
 
-    def read_memory_range(self, start: int, length: int) -> list[int]:
-        return [self.pyboy.memory[start + i] for i in range(length)]
+    def read_memory_range(self, start: int, length: int, bank: int | None = None) -> list[int]:
+        return [self.read_memory(start + i, bank) for i in range(length)]
 
     def screen_ndarray(self) -> np.ndarray:
         return np.asarray(self.pyboy.screen.ndarray)
