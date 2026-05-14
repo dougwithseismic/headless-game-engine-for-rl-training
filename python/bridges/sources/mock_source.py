@@ -13,11 +13,13 @@ class MockObservationSource:
         self,
         observation_space: gym.Space | None = None,
         terminal_after: int | None = None,
+        feature_names: list[str] | None = None,
     ):
         self._obs_space = observation_space or gym.spaces.Box(
             -1, 1, shape=(10,), dtype=np.float32
         )
         self._terminal_after = terminal_after
+        self._feature_names = feature_names
         self._step_count = 0
         self._connected = False
 
@@ -27,6 +29,7 @@ class MockObservationSource:
             observation_space=self._obs_space,
             native_hz=None,
             platform="any",
+            feature_names=self._feature_names,
         )
 
     def connect(self) -> None:

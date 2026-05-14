@@ -13,6 +13,7 @@ class ObservationSourceInfo:
     observation_space: gym.Space
     native_hz: float | None  # None = as-fast-as-possible
     platform: str
+    feature_names: list[str] | None = None
 
 
 @runtime_checkable

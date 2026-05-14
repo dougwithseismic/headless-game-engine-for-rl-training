@@ -110,23 +110,35 @@ def make_pokemon_red_bridge(
 
 
 # ---------------------------------------------------------------------------
+# Feature index (built automatically from POKEMON_RED_RAM names)
+# Use with: idx = bridge.feature_index; obs[idx["badges"]]
+# ---------------------------------------------------------------------------
+
+FEATURE_NAMES = [f.name for f in POKEMON_RED_RAM]
+
+
+# ---------------------------------------------------------------------------
 # Reward functions
 # ---------------------------------------------------------------------------
 
 
 class ExplorationReward:
-    """Rewards visiting new map tiles. Tracks (map_id, x, y) tuples."""
+    """Rewards visiting new map tiles. Tracks (map_id, x, y) tuples.
 
-    def __init__(self, new_tile_reward: float = 1.0, revisit_reward: float = 0.0):
+    Uses feature_index for named access so reward logic doesn't break
+    if features are reordered.
+    """
+
+    def __init__(self, feature_index: dict[str, int], new_tile_reward: float = 1.0, revisit_reward: float = 0.0):
+        self.idx = feature_index
         self.new_tile_reward = new_tile_reward
         self.revisit_reward = revisit_reward
         self.visited: set[tuple[int, int, int]] = set()
 
     def __call__(self, prev_obs: np.ndarray, action: np.ndarray, obs: np.ndarray) -> float:
-        # RAM feature indices match POKEMON_RED_RAM order
-        x = int(obs[0] * 255)
-        y = int(obs[1] * 255)
-        map_id = int(obs[2] * 255)
+        x = int(obs[self.idx["player_x"]] * 255)
+        y = int(obs[self.idx["player_y"]] * 255)
+        map_id = int(obs[self.idx["map_id"]] * 255)
         tile = (map_id, x, y)
 
         if tile not in self.visited:
@@ -139,23 +151,30 @@ class ExplorationReward:
 
 
 class ProgressReward:
-    """Composite reward combining exploration, badges, and HP management."""
+    """Composite reward combining exploration, badges, and HP management.
 
-    def __init__(self):
-        self.exploration = ExplorationReward(new_tile_reward=0.5)
+    Usage:
+        bridge = make_pokemon_red_bridge(...)
+        reward = ProgressReward(bridge.feature_index)
+        env = ExternalGameGym(bridge=bridge, reward_fn=reward)
+    """
+
+    def __init__(self, feature_index: dict[str, int]):
+        self.idx = feature_index
+        self.exploration = ExplorationReward(feature_index, new_tile_reward=0.5)
         self._prev_badges = 0
 
     def __call__(self, prev_obs: np.ndarray, action: np.ndarray, obs: np.ndarray) -> float:
         reward = self.exploration(prev_obs, action, obs)
 
-        # Badge reward (big bonus for new badges)
-        badges = int(obs[4] * 8)
+        badges = int(obs[self.idx["badges"]] * 8)
         if badges > self._prev_badges:
             reward += 10.0 * (badges - self._prev_badges)
             self._prev_badges = badges
 
-        # HP penalty (encourage keeping pokemon healthy)
-        hp_frac = obs[6] / max(obs[8], 0.01)
+        hp = obs[self.idx["party_hp_1"]]
+        max_hp = obs[self.idx["party_max_hp_1"]]
+        hp_frac = hp / max(max_hp, 0.01)
         if hp_frac < 0.2:
             reward -= 0.1
 
