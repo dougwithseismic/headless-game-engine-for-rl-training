@@ -41,6 +41,7 @@ class ExternalGameGym(gym.Env):
         self.observation_space = bridge.observation_space
         self.action_space = bridge.action_space
         self.feature_index = bridge.feature_index
+        self.feature_groups = bridge.feature_groups
 
         self.current_step = 0
         self.episode_reward = 0.0

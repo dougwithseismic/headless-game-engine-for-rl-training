@@ -8,12 +8,29 @@ import numpy as np
 
 
 @dataclass
+class FeatureGroup:
+    """A named slice of the flat observation vector."""
+    name: str
+    start: int
+    length: int
+
+    @property
+    def end(self) -> int:
+        return self.start + self.length
+
+    @property
+    def slice(self) -> slice:
+        return slice(self.start, self.end)
+
+
+@dataclass
 class ObservationSourceInfo:
     name: str
     observation_space: gym.Space
     native_hz: float | None  # None = as-fast-as-possible
     platform: str
     feature_names: list[str] | None = None
+    feature_groups: list[FeatureGroup] | None = None
 
 
 @runtime_checkable

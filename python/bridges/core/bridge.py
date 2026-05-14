@@ -6,7 +6,7 @@ import gymnasium as gym
 import numpy as np
 
 from bridges.core.action_sink import ActionSink
-from bridges.core.obs_source import ObservationSource
+from bridges.core.obs_source import ObservationSource, FeatureGroup
 from bridges.core.reset_strategy import ResetStrategy
 from bridges.core.timing import TimingConfig, TimingPolicy, StepTimer
 
@@ -42,6 +42,8 @@ class GameBridge:
         self._observation_space = obs_info.observation_space
         names = obs_info.feature_names
         self._feature_index: dict[str, int] = {n: i for i, n in enumerate(names)} if names else {}
+        groups = obs_info.feature_groups
+        self._feature_groups: dict[str, slice] = {g.name: g.slice for g in groups} if groups else {}
 
     @property
     def action_space(self) -> gym.Space:
@@ -54,6 +56,10 @@ class GameBridge:
     @property
     def feature_index(self) -> dict[str, int]:
         return self._feature_index
+
+    @property
+    def feature_groups(self) -> dict[str, slice]:
+        return self._feature_groups
 
     @property
     def connected(self) -> bool:

@@ -1,5 +1,5 @@
 from bridges.core.action_sink import ActionSink, ActionSinkInfo
-from bridges.core.obs_source import ObservationSource, ObservationSourceInfo
+from bridges.core.obs_source import ObservationSource, ObservationSourceInfo, FeatureGroup
 from bridges.core.reset_strategy import ResetStrategy, ResetInfo
 from bridges.core.timing import TimingPolicy, TimingConfig, StepTimer
 from bridges.core.bridge import GameBridge, GameBridgeConfig
@@ -9,6 +9,7 @@ __all__ = [
     "ActionSinkInfo",
     "ObservationSource",
     "ObservationSourceInfo",
+    "FeatureGroup",
     "ResetStrategy",
     "ResetInfo",
     "TimingPolicy",

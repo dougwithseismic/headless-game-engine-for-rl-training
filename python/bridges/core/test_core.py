@@ -308,3 +308,103 @@ def test_feature_index_used_in_reward():
     obs, reward, _, _, _ = env.step(env.action_space.sample())
     assert isinstance(reward, float)
     env.close()
+
+
+# ---------------------------------------------------------------------------
+# Feature groups
+# ---------------------------------------------------------------------------
+
+
+def test_bridge_feature_groups_empty_by_default():
+    bridge = _make_bridge()
+    assert bridge.feature_groups == {}
+
+
+def test_bridge_feature_groups_from_source():
+    from bridges.core.obs_source import FeatureGroup
+
+    bridge = GameBridge(
+        action_sink=MockActionSink(),
+        observation_source=MockObservationSource(
+            observation_space=gym.spaces.Box(-1, 1, shape=(10,), dtype=np.float32),
+            feature_names=[f"f{i}" for i in range(10)],
+            feature_groups=[
+                FeatureGroup("resources", 0, 4),
+                FeatureGroup("military", 4, 3),
+                FeatureGroup("diplomacy", 7, 3),
+            ],
+        ),
+        reset_strategy=MockReset(),
+        config=GameBridgeConfig(
+            name="groups_test",
+            timing=TimingConfig(policy=TimingPolicy.FREE_RUNNING),
+        ),
+    )
+    groups = bridge.feature_groups
+    assert "resources" in groups
+    assert "military" in groups
+    assert "diplomacy" in groups
+    assert groups["resources"] == slice(0, 4)
+    assert groups["military"] == slice(4, 7)
+    assert groups["diplomacy"] == slice(7, 10)
+
+
+def test_feature_groups_slice_obs():
+    from bridges.core.obs_source import FeatureGroup
+
+    bridge = GameBridge(
+        action_sink=MockActionSink(),
+        observation_source=MockObservationSource(
+            observation_space=gym.spaces.Box(0, 1, shape=(6,), dtype=np.float32),
+            feature_groups=[
+                FeatureGroup("position", 0, 3),
+                FeatureGroup("velocity", 3, 3),
+            ],
+        ),
+        reset_strategy=MockReset(),
+        config=GameBridgeConfig(
+            name="slice_test",
+            timing=TimingConfig(policy=TimingPolicy.FREE_RUNNING),
+        ),
+    )
+    groups = bridge.feature_groups
+    bridge.connect()
+    obs = bridge.reset()
+    position = obs[groups["position"]]
+    velocity = obs[groups["velocity"]]
+    assert position.shape == (3,)
+    assert velocity.shape == (3,)
+    bridge.disconnect()
+
+
+def test_feature_groups_in_reward():
+    from bridges.core.obs_source import FeatureGroup
+    from glgym.gym_external import ExternalGameGym
+
+    bridge = GameBridge(
+        action_sink=MockActionSink(),
+        observation_source=MockObservationSource(
+            observation_space=gym.spaces.Box(-1, 1, shape=(8,), dtype=np.float32),
+            feature_groups=[
+                FeatureGroup("resources", 0, 4),
+                FeatureGroup("units", 4, 4),
+            ],
+        ),
+        reset_strategy=MockReset(),
+        config=GameBridgeConfig(
+            name="reward_groups_test",
+            timing=TimingConfig(policy=TimingPolicy.FREE_RUNNING),
+        ),
+    )
+    groups = bridge.feature_groups
+
+    def reward_fn(prev_obs, action, obs):
+        resources = obs[groups["resources"]]
+        return float(np.sum(resources))
+
+    env = ExternalGameGym(bridge=bridge, reward_fn=reward_fn, max_steps=10)
+    assert env.feature_groups == {"resources": slice(0, 4), "units": slice(4, 8)}
+    obs, _ = env.reset()
+    _, reward, _, _, _ = env.step(env.action_space.sample())
+    assert isinstance(reward, float)
+    env.close()
